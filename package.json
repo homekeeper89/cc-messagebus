@@ -1,0 +1,33 @@
+{
+	"name": "cc-messagebus",
+	"version": "0.0.0",
+	"description": "Cross-session message bus for Claude Code with central observability",
+	"type": "module",
+	"bin": {
+		"cc-messagebus": "./bin/cc-messagebus"
+	},
+	"files": [
+		"bin",
+		"dist"
+	],
+	"engines": {
+		"node": ">=20"
+	},
+	"scripts": {
+		"build": "tsc",
+		"dev": "tsc --watch",
+		"typecheck": "tsc --noEmit",
+		"test": "node --test --import tsx 'test/**/*.test.ts'"
+	},
+	"dependencies": {
+		"@modelcontextprotocol/sdk": "^1.0.0",
+		"better-sqlite3": "^11.0.0",
+		"fastify": "^5.0.0"
+	},
+	"devDependencies": {
+		"@types/better-sqlite3": "^7.6.0",
+		"@types/node": "^22.0.0",
+		"tsx": "^4.19.0",
+		"typescript": "^5.6.0"
+	}
+}
