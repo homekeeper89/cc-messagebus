@@ -1,0 +1,6 @@
+node_modules/
+dist/
+.cc-bus/
+*.log
+.DS_Store
+.claude/
