@@ -14,7 +14,7 @@
 		"node": ">=20"
 	},
 	"scripts": {
-		"build": "tsc",
+		"build": "tsc && mkdir -p dist/dashboard && cp src/dashboard/index.html dist/dashboard/index.html",
 		"dev": "tsc --watch",
 		"typecheck": "tsc --noEmit",
 		"lint": "biome lint",

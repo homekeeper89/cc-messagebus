@@ -65,6 +65,9 @@ function plusDays(iso: string, days: number): string {
 
 export function createBroker(db: CcDatabase, opts: BrokerOptions): Broker {
 	const events = new EventEmitter();
+	// dashboard /events 와 /tail 다중 연결 시 listener 가 빠르게 누적되어
+	// 정상 동작인데도 MaxListenersExceededWarning 이 stderr 로 새는 것을 방지.
+	events.setMaxListeners(0);
 	events.on("error", () => {});
 
 	function emit(event: DashboardEvent): void {

@@ -1,8 +1,398 @@
 <!doctype html>
 <html lang="en">
-  <head>
-    <meta charset="utf-8" />
-    <title>cc-messagebus</title>
-  </head>
-  <body></body>
+	<head>
+		<meta charset="utf-8" />
+		<meta name="viewport" content="width=device-width, initial-scale=1" />
+		<title>cc-messagebus</title>
+		<style>
+			:root {
+				color-scheme: light dark;
+				--bg: #0e1116;
+				--panel: #161b22;
+				--border: #30363d;
+				--text: #c9d1d9;
+				--muted: #8b949e;
+				--accent: #58a6ff;
+				--ok: #3fb950;
+				--warn: #d29922;
+				--err: #f85149;
+				--mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+			}
+			* {
+				box-sizing: border-box;
+			}
+			html,
+			body {
+				height: 100%;
+				margin: 0;
+				background: var(--bg);
+				color: var(--text);
+				font-family: var(--mono);
+				font-size: 13px;
+			}
+			body {
+				display: grid;
+				grid-template-rows: auto 1fr;
+			}
+			header {
+				display: flex;
+				align-items: center;
+				justify-content: space-between;
+				padding: 10px 16px;
+				border-bottom: 1px solid var(--border);
+				background: var(--panel);
+			}
+			header h1 {
+				font-size: 14px;
+				margin: 0;
+				font-weight: 600;
+				letter-spacing: 0.02em;
+			}
+			.status {
+				display: inline-flex;
+				align-items: center;
+				gap: 6px;
+				color: var(--muted);
+			}
+			.status .dot {
+				width: 8px;
+				height: 8px;
+				border-radius: 50%;
+				background: var(--muted);
+			}
+			.status[data-state="connected"] .dot {
+				background: var(--ok);
+			}
+			.status[data-state="reconnecting"] .dot {
+				background: var(--warn);
+			}
+			.status[data-state="closed"] .dot {
+				background: var(--err);
+			}
+			main {
+				display: grid;
+				grid-template-columns: 280px 1fr;
+				min-height: 0;
+			}
+			aside {
+				border-right: 1px solid var(--border);
+				overflow-y: auto;
+				padding: 12px;
+				background: var(--panel);
+			}
+			aside h2 {
+				font-size: 11px;
+				text-transform: uppercase;
+				letter-spacing: 0.08em;
+				color: var(--muted);
+				margin: 0 0 8px;
+				font-weight: 600;
+			}
+			#sessions {
+				list-style: none;
+				margin: 0;
+				padding: 0;
+			}
+			#sessions li {
+				display: flex;
+				align-items: center;
+				gap: 8px;
+				padding: 6px 4px;
+				border-radius: 4px;
+			}
+			#sessions li .dot {
+				width: 8px;
+				height: 8px;
+				border-radius: 50%;
+				background: var(--muted);
+				flex-shrink: 0;
+			}
+			#sessions li[data-status="connected"] .dot {
+				background: var(--ok);
+			}
+			#sessions li[data-status="disconnected"] .dot {
+				background: var(--muted);
+				opacity: 0.5;
+			}
+			#sessions li .topic {
+				flex: 1;
+				color: var(--text);
+			}
+			#sessions li[data-status="disconnected"] .topic {
+				color: var(--muted);
+			}
+			#sessions li .q {
+				color: var(--muted);
+				font-size: 11px;
+			}
+			#sessions .empty {
+				color: var(--muted);
+				font-style: italic;
+				padding: 4px;
+			}
+			section {
+				overflow-y: auto;
+				padding: 12px 16px;
+			}
+			section h2 {
+				font-size: 11px;
+				text-transform: uppercase;
+				letter-spacing: 0.08em;
+				color: var(--muted);
+				margin: 0 0 8px;
+				font-weight: 600;
+			}
+			#flow {
+				list-style: none;
+				margin: 0;
+				padding: 0;
+			}
+			#flow li {
+				padding: 4px 6px;
+				border-bottom: 1px solid var(--border);
+				cursor: pointer;
+				white-space: nowrap;
+				overflow: hidden;
+				text-overflow: ellipsis;
+			}
+			#flow li:hover {
+				background: rgba(88, 166, 255, 0.06);
+			}
+			#flow li .time {
+				color: var(--muted);
+				margin-right: 8px;
+			}
+			#flow li .kind {
+				display: inline-block;
+				min-width: 56px;
+				color: var(--accent);
+				margin-right: 8px;
+			}
+			#flow li[data-kind="message_read"] .kind {
+				color: var(--warn);
+			}
+			#flow li[data-kind="message_acked"] .kind {
+				color: var(--ok);
+			}
+			#flow li[data-kind="message_redelivered"] .kind,
+			#flow li[data-kind="message_expired"] .kind {
+				color: var(--err);
+			}
+			#flow li[data-kind="session_registered"] .kind,
+			#flow li[data-kind="session_disconnected"] .kind {
+				color: var(--muted);
+			}
+			#flow li pre {
+				display: none;
+				margin: 6px 0 0;
+				padding: 8px;
+				background: rgba(255, 255, 255, 0.04);
+				border-radius: 4px;
+				white-space: pre-wrap;
+				word-break: break-all;
+				color: var(--text);
+				font-size: 12px;
+			}
+			#flow li[data-open="1"] pre {
+				display: block;
+			}
+			#flow .empty {
+				color: var(--muted);
+				font-style: italic;
+				padding: 4px;
+			}
+		</style>
+	</head>
+	<body>
+		<header>
+			<h1>cc-messagebus</h1>
+			<span id="status" class="status" data-state="connecting"
+				><span class="dot"></span><span id="status-text">connecting</span></span
+			>
+		</header>
+		<main>
+			<aside>
+				<h2>Sessions <span id="sessions-count">(0)</span></h2>
+				<ul id="sessions">
+					<li class="empty">(no sessions)</li>
+				</ul>
+			</aside>
+			<section>
+				<h2>Message Flow</h2>
+				<ol id="flow">
+					<li class="empty">(no events yet)</li>
+				</ol>
+			</section>
+		</main>
+		<script type="module">
+			const FLOW_CAP = 500;
+			const sessions = new Map();
+			const sessionsEl = document.getElementById("sessions");
+			const sessionsCountEl = document.getElementById("sessions-count");
+			const flowEl = document.getElementById("flow");
+			const statusEl = document.getElementById("status");
+			const statusTextEl = document.getElementById("status-text");
+
+			function setStatus(state, text) {
+				statusEl.dataset.state = state;
+				statusTextEl.textContent = text;
+			}
+
+			function renderSessions() {
+				sessionsCountEl.textContent = `(${sessions.size})`;
+				if (sessions.size === 0) {
+					sessionsEl.replaceChildren();
+					const li = document.createElement("li");
+					li.className = "empty";
+					li.textContent = "(no sessions)";
+					sessionsEl.append(li);
+					return;
+				}
+				const entries = [...sessions.values()].sort((a, b) =>
+					a.topicId.localeCompare(b.topicId),
+				);
+				sessionsEl.replaceChildren(
+					...entries.map((p) => {
+						const li = document.createElement("li");
+						li.dataset.status = p.status ?? "connected";
+						const dot = document.createElement("span");
+						dot.className = "dot";
+						const topic = document.createElement("span");
+						topic.className = "topic";
+						topic.textContent = p.topicId;
+						const q = document.createElement("span");
+						q.className = "q";
+						q.textContent = `q=${p.queueLength ?? 0}`;
+						li.append(dot, topic, q);
+						return li;
+					}),
+				);
+			}
+
+			function timeLabel(iso) {
+				const d = iso ? new Date(iso) : new Date();
+				return d.toTimeString().slice(0, 8);
+			}
+
+			function describe(event) {
+				switch (event.type) {
+					case "message_sent":
+						return `${event.message.from} → ${event.message.to}  ${event.message.subject}`;
+					case "message_read":
+					case "message_acked":
+						return `${event.topicId}  ${event.messageId.slice(0, 8)}`;
+					case "message_redelivered":
+					case "message_expired":
+						return event.messageId.slice(0, 8);
+					case "session_registered":
+						return event.peer.topicId;
+					case "session_disconnected":
+						return event.topicId;
+					default:
+						return "";
+				}
+			}
+
+			function pushFlow(event) {
+				if (flowEl.firstElementChild?.classList?.contains("empty")) {
+					flowEl.replaceChildren();
+				}
+				const li = document.createElement("li");
+				li.dataset.kind = event.type;
+				const at =
+					event.at ?? event.message?.sentAt ?? new Date().toISOString();
+				const time = document.createElement("span");
+				time.className = "time";
+				time.textContent = timeLabel(at);
+				const kind = document.createElement("span");
+				kind.className = "kind";
+				kind.textContent = event.type
+					.replace(/^message_/, "")
+					.replace(/^session_/, "");
+				const desc = document.createTextNode(describe(event));
+				li.append(time, kind, desc);
+				const detail = document.createElement("pre");
+				detail.textContent = JSON.stringify(event, null, 2);
+				li.append(detail);
+				li.addEventListener("click", () => {
+					li.dataset.open = li.dataset.open === "1" ? "0" : "1";
+				});
+				flowEl.prepend(li);
+				while (flowEl.children.length > FLOW_CAP) {
+					flowEl.lastElementChild?.remove();
+				}
+			}
+
+			function applySnapshot(peers) {
+				sessions.clear();
+				for (const p of peers) sessions.set(p.topicId, p);
+				renderSessions();
+			}
+
+			function applyRegistered(peer) {
+				sessions.set(peer.topicId, { ...peer, status: "connected" });
+				renderSessions();
+			}
+
+			function applyDisconnected(topicId) {
+				const existing = sessions.get(topicId);
+				if (existing) {
+					sessions.set(topicId, { ...existing, status: "disconnected" });
+					renderSessions();
+				}
+			}
+
+			function applyQueueDelta(topicId, delta) {
+				const existing = sessions.get(topicId);
+				if (!existing) return;
+				const next = Math.max(0, (existing.queueLength ?? 0) + delta);
+				sessions.set(topicId, { ...existing, queueLength: next });
+				renderSessions();
+			}
+
+			function connect() {
+				const es = new EventSource("/events");
+				setStatus("connecting", "connecting");
+				es.onopen = () => setStatus("connected", "connected");
+				es.onerror = () => setStatus("reconnecting", "reconnecting");
+
+				es.addEventListener("session_snapshot", (e) => {
+					const data = JSON.parse(e.data);
+					applySnapshot(data.peers);
+				});
+				es.addEventListener("session_registered", (e) => {
+					const data = JSON.parse(e.data);
+					applyRegistered(data.peer);
+					pushFlow(data);
+				});
+				es.addEventListener("session_disconnected", (e) => {
+					const data = JSON.parse(e.data);
+					applyDisconnected(data.topicId);
+					pushFlow(data);
+				});
+				es.addEventListener("message_sent", (e) => {
+					const data = JSON.parse(e.data);
+					applyQueueDelta(data.message.to, 1);
+					pushFlow(data);
+				});
+				es.addEventListener("message_read", (e) => {
+					pushFlow(JSON.parse(e.data));
+				});
+				es.addEventListener("message_acked", (e) => {
+					const data = JSON.parse(e.data);
+					applyQueueDelta(data.topicId, -1);
+					pushFlow(data);
+				});
+				es.addEventListener("message_redelivered", (e) => {
+					pushFlow(JSON.parse(e.data));
+				});
+				es.addEventListener("message_expired", (e) => {
+					pushFlow(JSON.parse(e.data));
+				});
+				es.addEventListener("heartbeat", () => {});
+			}
+
+			connect();
+		</script>
+	</body>
 </html>
