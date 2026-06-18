@@ -1,6 +1,7 @@
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { runTail } from "./client/tail.js";
+import { runMcp } from "./mcp/server.js";
 import { createServer } from "./server/index.js";
 
 const DEFAULT_DB_PATH = join(homedir(), ".cc-messagebus", "data.db");
@@ -72,12 +73,12 @@ switch (subcommand) {
 		break;
 	}
 	case "mcp":
+		await runMcp();
+		break;
 	case "status":
 	case "dashboard":
 	case "stop":
-		process.stderr.write(
-			`'${subcommand}' is not implemented yet — Phase 6/7\n`,
-		);
+		process.stderr.write(`'${subcommand}' is not implemented yet — Phase 7\n`);
 		process.exit(1);
 		break;
 	default:
