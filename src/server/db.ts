@@ -10,6 +10,18 @@ import type {
 } from "../protocol/http.js";
 import { SessionStatus } from "../protocol/http.js";
 
+export type DbErrorCode =
+	| "TOPIC_ALREADY_REGISTERED"
+	| "MESSAGE_NOT_FOUND"
+	| "MESSAGE_NOT_IN_FLIGHT";
+
+export class DbError extends Error {
+	constructor(public code: DbErrorCode) {
+		super(code);
+		this.name = "DbError";
+	}
+}
+
 const MIGRATION = `
 CREATE TABLE IF NOT EXISTS sessions (
 	topic_id TEXT PRIMARY KEY,
@@ -159,7 +171,7 @@ export function openDatabase(dbPath: string) {
 		const existing = stmtGetSession.get(topicId);
 		if (existing) {
 			if (existing.status === SessionStatus.CONNECTED) {
-				throw new Error("TOPIC_ALREADY_REGISTERED");
+				throw new DbError("TOPIC_ALREADY_REGISTERED");
 			}
 			stmtReactivateSession.run(SessionStatus.CONNECTED, now, now, topicId);
 		} else {
@@ -220,11 +232,10 @@ export function openDatabase(dbPath: string) {
 			inFlightUntil: IsoTimestamp,
 		): MessageDto[] => {
 			const rows = stmtSelectDeliverable.all(topicId, now, max);
-			for (const row of rows) {
+			return rows.map((row) => {
 				stmtSetInFlight.run(inFlightUntil, row.id);
-				row.in_flight_until = inFlightUntil;
-			}
-			return rows.map(rowToMessage);
+				return { ...rowToMessage(row), inFlightUntil };
+			});
 		},
 	);
 
@@ -234,8 +245,8 @@ export function openDatabase(dbPath: string) {
 		now: IsoTimestamp,
 	): IsoTimestamp {
 		const row = stmtGetMessage.get(messageId, topicId);
-		if (!row) throw new Error("MESSAGE_NOT_FOUND");
-		if (row.in_flight_until === null) throw new Error("MESSAGE_NOT_IN_FLIGHT");
+		if (!row) throw new DbError("MESSAGE_NOT_FOUND");
+		if (row.in_flight_until === null) throw new DbError("MESSAGE_NOT_IN_FLIGHT");
 		stmtAckMessage.run(now, messageId);
 		return now;
 	}
