@@ -1,3 +1,6 @@
+import { readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import Fastify, { type FastifyError, type FastifyInstance } from "fastify";
 import { type ErrorCode, errorCodeToHttpStatus } from "../protocol/errors.js";
 import {
@@ -9,6 +12,8 @@ import {
 	type UnregisterRequest,
 } from "../protocol/http.js";
 import {
+	DASHBOARD_EVENT_TYPES,
+	type DashboardEvent,
 	type MessageSentEvent,
 	SSE_HEARTBEAT_INTERVAL_SEC,
 	serializeSseEvent,
@@ -22,6 +27,13 @@ const DEFAULT_PORT = 5959;
 const DEFAULT_VISIBILITY_TIMEOUT_SEC = 30;
 const DEFAULT_TTL_DAYS = 30;
 const DEFAULT_CLEANUP_INTERVAL_SEC = 60;
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
+const DASHBOARD_HTML = readFileSync(
+	join(__dirname, "../dashboard/index.html"),
+	"utf8",
+);
 
 const TOPIC_ID_SCHEMA = { type: "string", minLength: 1, maxLength: 64 };
 const SUBJECT_SCHEMA = { type: "string", minLength: 1, maxLength: 256 };
@@ -242,6 +254,74 @@ export function createServer(opts: ServerOptions): Server {
 			});
 		},
 	);
+
+	app.get("/dashboard", async (_req, reply) => {
+		reply.type("text/html; charset=utf-8").send(DASHBOARD_HTML);
+	});
+
+	app.get("/events", (_req, reply) => {
+		reply.hijack();
+		const raw = reply.raw;
+		raw.writeHead(200, {
+			"Content-Type": "text/event-stream",
+			"Cache-Control": "no-cache, no-transform",
+			Connection: "keep-alive",
+			"X-Accel-Buffering": "no",
+		});
+
+		const listened = Object.values(DASHBOARD_EVENT_TYPES).filter(
+			(t) => t !== DASHBOARD_EVENT_TYPES.sessionSnapshot,
+		);
+
+		let closed = false;
+		const cleanup = (): void => {
+			if (closed) return;
+			closed = true;
+			clearInterval(heartbeat);
+			for (const t of listened) broker.events.off(t, onEvent);
+		};
+		const safeWrite = (chunk: string): void => {
+			try {
+				raw.write(chunk);
+			} catch {
+				cleanup();
+			}
+		};
+
+		const onEvent = (event: DashboardEvent): void => {
+			safeWrite(serializeSseEvent(event));
+		};
+
+		safeWrite(
+			serializeSseEvent({
+				type: "session_snapshot",
+				peers: broker.listPeers().peers,
+				at: new Date().toISOString(),
+			}),
+		);
+		safeWrite(
+			serializeSseEvent({
+				type: "heartbeat",
+				at: new Date().toISOString(),
+			}),
+		);
+
+		for (const t of listened) broker.events.on(t, onEvent);
+
+		const heartbeat = setInterval(() => {
+			safeWrite(
+				serializeSseEvent({
+					type: "heartbeat",
+					at: new Date().toISOString(),
+				}),
+			);
+		}, SSE_HEARTBEAT_INTERVAL_SEC * 1000);
+		heartbeat.unref();
+
+		raw.on("close", () => {
+			cleanup();
+		});
+	});
 
 	app.setErrorHandler((err: FastifyError, _req, reply) => {
 		if (err instanceof BrokerError) {
