@@ -20,22 +20,27 @@ export function startCleanup(
 
 	function tick(): void {
 		if (stopped) return;
-		const now = new Date().toISOString();
-		const expired = db.expireInFlight(now);
-		for (const messageId of expired) {
-			broker.events.emit("message_redelivered", {
-				type: "message_redelivered",
-				messageId,
-				at: now,
-			});
-		}
-		const deleted = db.deleteExpired(now);
-		for (const messageId of deleted) {
-			broker.events.emit("message_expired", {
-				type: "message_expired",
-				messageId,
-				at: now,
-			});
+		try {
+			const now = new Date().toISOString();
+			const expired = db.expireInFlight(now);
+			for (const messageId of expired) {
+				broker.events.emit("message_redelivered", {
+					type: "message_redelivered",
+					messageId,
+					at: now,
+				});
+			}
+			const deleted = db.deleteExpired(now);
+			for (const messageId of deleted) {
+				broker.events.emit("message_expired", {
+					type: "message_expired",
+					messageId,
+					at: now,
+				});
+			}
+		} catch (e) {
+			// daemon 가용성 보호: tick 실패가 process crash 로 이어지지 않도록 격리
+			broker.events.emit("cleanup_error", { error: e });
 		}
 	}
 

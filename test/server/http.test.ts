@@ -159,6 +159,98 @@ describe("http", () => {
 		assert.equal(rereadRes.json().messages.length, 0);
 	});
 
+	test("POST /api/unregister unknown topic returns 404 + TOPIC_NOT_FOUND", async () => {
+		const res = await server.app.inject({
+			method: "POST",
+			url: "/api/unregister",
+			payload: { topicId: "ghost" },
+		});
+		assert.equal(res.statusCode, 404);
+		const body = res.json();
+		assert.equal(body.ok, false);
+		assert.equal(body.error.code, "TOPIC_NOT_FOUND");
+	});
+
+	test("POST /api/unregister purgeQueue=true drops messages", async () => {
+		await server.app.inject({
+			method: "POST",
+			url: "/api/register",
+			payload: { topicId: "alice" },
+		});
+		await server.app.inject({
+			method: "POST",
+			url: "/api/register",
+			payload: { topicId: "bob" },
+		});
+		await server.app.inject({
+			method: "POST",
+			url: "/api/send",
+			payload: { from: "alice", to: "bob", subject: "s", body: "b" },
+		});
+		const res = await server.app.inject({
+			method: "POST",
+			url: "/api/unregister",
+			payload: { topicId: "bob", purgeQueue: true },
+		});
+		assert.equal(res.statusCode, 200);
+		assert.equal(res.json().purged, true);
+
+		await server.app.inject({
+			method: "POST",
+			url: "/api/register",
+			payload: { topicId: "bob" },
+		});
+		const peers = await server.app.inject({
+			method: "POST",
+			url: "/api/list_peers",
+			payload: {},
+		});
+		const bob = peers
+			.json()
+			.peers.find((p: { topicId: string }) => p.topicId === "bob");
+		assert.equal(bob.queueLength, 0);
+	});
+
+	test("POST /api/unregister purgeQueue=false preserves messages", async () => {
+		await server.app.inject({
+			method: "POST",
+			url: "/api/register",
+			payload: { topicId: "alice" },
+		});
+		await server.app.inject({
+			method: "POST",
+			url: "/api/register",
+			payload: { topicId: "bob" },
+		});
+		await server.app.inject({
+			method: "POST",
+			url: "/api/send",
+			payload: { from: "alice", to: "bob", subject: "s", body: "b" },
+		});
+		const res = await server.app.inject({
+			method: "POST",
+			url: "/api/unregister",
+			payload: { topicId: "bob", purgeQueue: false },
+		});
+		assert.equal(res.statusCode, 200);
+		assert.equal(res.json().purged, false);
+
+		await server.app.inject({
+			method: "POST",
+			url: "/api/register",
+			payload: { topicId: "bob" },
+		});
+		const peers = await server.app.inject({
+			method: "POST",
+			url: "/api/list_peers",
+			payload: {},
+		});
+		const bob = peers
+			.json()
+			.peers.find((p: { topicId: string }) => p.topicId === "bob");
+		assert.equal(bob.queueLength, 1);
+	});
+
 	test("persistence: data survives db close + reopen", async () => {
 		await server.app.inject({
 			method: "POST",

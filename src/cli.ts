@@ -9,7 +9,15 @@ async function runServe(): Promise<void> {
 		dbPath: process.env.CC_MESSAGEBUS_DB ?? DEFAULT_DB_PATH,
 		logger: true,
 	});
-	const address = await server.start();
+	let address: string;
+	try {
+		address = await server.start();
+	} catch (e) {
+		const msg = e instanceof Error ? e.message : String(e);
+		// EADDRINUSE 같은 운영 진입점 실패를 사용자에게 명확히 알림
+		process.stderr.write(`failed to start cc-messagebus: ${msg}\n`);
+		process.exit(1);
+	}
 	process.stdout.write(`cc-messagebus listening on ${address}\n`);
 
 	const shutdown = async (signal: NodeJS.Signals): Promise<void> => {
@@ -23,8 +31,9 @@ async function runServe(): Promise<void> {
 		}
 	};
 
-	process.on("SIGINT", shutdown);
-	process.on("SIGTERM", shutdown);
+	// once: 재진입 시 server.stop() 두 번 호출되어 close 된 db 에서 throw 방지
+	process.once("SIGINT", shutdown);
+	process.once("SIGTERM", shutdown);
 }
 
 function printUsage(): void {
