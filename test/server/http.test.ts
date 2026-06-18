@@ -2,7 +2,16 @@ import assert from "node:assert/strict";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { after, before, beforeEach, describe, test } from "node:test";
+import {
+	after,
+	afterEach,
+	before,
+	beforeEach,
+	describe,
+	test,
+} from "node:test";
+import { setTimeout as delay } from "node:timers/promises";
+import { parseSseChunks } from "../../src/client/tail.js";
 import { createServer, type Server } from "../../src/server/index.js";
 
 describe("http", () => {
@@ -292,5 +301,159 @@ describe("http", () => {
 			payload: { topicId: "bob" },
 		});
 		assert.equal(read.json().messages.length, 1);
+	});
+});
+
+describe("tail SSE", () => {
+	let tmpDir: string;
+	let dbPath: string;
+	let server: Server;
+	let baseUrl: string;
+
+	before(() => {
+		tmpDir = mkdtempSync(join(tmpdir(), "ccmb-tail-"));
+		dbPath = join(tmpDir, "data.db");
+	});
+
+	after(() => {
+		rmSync(tmpDir, { recursive: true, force: true });
+	});
+
+	beforeEach(async () => {
+		rmSync(dbPath, { force: true });
+		server = createServer({
+			dbPath,
+			host: "127.0.0.1",
+			port: 0,
+			visibilityTimeoutSec: 30,
+			ttlDays: 30,
+			cleanupIntervalSec: 60,
+		});
+		baseUrl = await server.start();
+	});
+
+	afterEach(async () => {
+		await server.stop();
+	});
+
+	async function readOneEvent(
+		reader: ReadableStreamDefaultReader<Uint8Array>,
+		decoder: TextDecoder,
+		predicate: (event: { type: string }) => boolean,
+	): Promise<{ type: string; [k: string]: unknown }> {
+		let buffer = "";
+		while (true) {
+			const { value, done } = await reader.read();
+			if (done) throw new Error("stream ended before predicate matched");
+			buffer += decoder.decode(value, { stream: true });
+			const { events, rest } = parseSseChunks(buffer);
+			buffer = rest;
+			for (const e of events) {
+				const evt = e as { type: string };
+				if (predicate(evt)) return evt as { type: string };
+			}
+		}
+	}
+
+	test("GET /tail/:topicId unknown topic returns 404", async () => {
+		const res = await fetch(`${baseUrl}/tail/ghost`);
+		assert.equal(res.status, 404);
+		const body = (await res.json()) as {
+			ok: boolean;
+			error: { code: string };
+		};
+		assert.equal(body.ok, false);
+		assert.equal(body.error.code, "TOPIC_NOT_FOUND");
+	});
+
+	test("GET /tail/:topicId pushes message_delivered on send", async () => {
+		await fetch(`${baseUrl}/api/register`, {
+			method: "POST",
+			headers: { "content-type": "application/json" },
+			body: JSON.stringify({ topicId: "alice" }),
+		});
+		await fetch(`${baseUrl}/api/register`, {
+			method: "POST",
+			headers: { "content-type": "application/json" },
+			body: JSON.stringify({ topicId: "bob" }),
+		});
+
+		const controller = new AbortController();
+		try {
+			const res = await fetch(`${baseUrl}/tail/bob`, {
+				signal: controller.signal,
+				headers: { Accept: "text/event-stream" },
+			});
+			assert.equal(res.status, 200);
+			assert.ok(res.body, "expected response body stream");
+			const reader = res.body.getReader();
+			const decoder = new TextDecoder();
+
+			const heartbeat = await readOneEvent(
+				reader,
+				decoder,
+				(e) => e.type === "heartbeat",
+			);
+			assert.equal(heartbeat.type, "heartbeat");
+
+			await fetch(`${baseUrl}/api/send`, {
+				method: "POST",
+				headers: { "content-type": "application/json" },
+				body: JSON.stringify({
+					from: "alice",
+					to: "bob",
+					subject: "ping",
+					body: "hi",
+				}),
+			});
+
+			const delivered = await readOneEvent(
+				reader,
+				decoder,
+				(e) => e.type === "message_delivered",
+			);
+			assert.equal(delivered.type, "message_delivered");
+			const msg = (delivered as { message: { to: string; subject: string } })
+				.message;
+			assert.equal(msg.to, "bob");
+			assert.equal(msg.subject, "ping");
+		} finally {
+			controller.abort();
+		}
+	});
+
+	test("GET /tail/:topicId close marks peer disconnected", async () => {
+		await fetch(`${baseUrl}/api/register`, {
+			method: "POST",
+			headers: { "content-type": "application/json" },
+			body: JSON.stringify({ topicId: "bob" }),
+		});
+
+		const controller = new AbortController();
+		const res = await fetch(`${baseUrl}/tail/bob`, {
+			signal: controller.signal,
+			headers: { Accept: "text/event-stream" },
+		});
+		assert.equal(res.status, 200);
+		assert.ok(res.body, "expected response body stream");
+		const reader = res.body.getReader();
+		const decoder = new TextDecoder();
+		await readOneEvent(reader, decoder, (e) => e.type === "heartbeat");
+
+		controller.abort();
+		// raw 'close' 가 broker.disconnect 까지 호출하는 데 짧은 tick 필요
+		await delay(100);
+
+		const peersRes = await fetch(`${baseUrl}/api/list_peers`, {
+			method: "POST",
+			headers: { "content-type": "application/json" },
+			body: JSON.stringify({}),
+		});
+		const peersBody = (await peersRes.json()) as {
+			peers: { topicId: string; status: string }[];
+		};
+		const bob = peersBody.peers.find((p) => p.topicId === "bob");
+		assert.ok(bob, "bob peer must exist");
+		assert.equal(bob.status, "disconnected");
 	});
 });
