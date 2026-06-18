@@ -1,5 +1,6 @@
 import { homedir } from "node:os";
 import { join } from "node:path";
+import { runDashboard } from "./client/dashboard.js";
 import { runTail } from "./client/tail.js";
 import { runMcp } from "./mcp/server.js";
 import { createServer } from "./server/index.js";
@@ -75,8 +76,10 @@ switch (subcommand) {
 	case "mcp":
 		await runMcp();
 		break;
-	case "status":
 	case "dashboard":
+		runDashboard({ baseUrl: process.env.CC_MESSAGEBUS_URL });
+		break;
+	case "status":
 	case "stop":
 		process.stderr.write(`'${subcommand}' is not implemented yet — Phase 7\n`);
 		process.exit(1);
