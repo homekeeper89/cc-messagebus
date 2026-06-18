@@ -8,6 +8,11 @@ import {
 	type SendRequest,
 	type UnregisterRequest,
 } from "../protocol/http.js";
+import {
+	type MessageSentEvent,
+	SSE_HEARTBEAT_INTERVAL_SEC,
+	serializeSseEvent,
+} from "../protocol/sse.js";
 import { type Broker, BrokerError, createBroker } from "./broker.js";
 import { type CleanupHandle, startCleanup } from "./cleanup.js";
 import { type CcDatabase, openDatabase } from "./db.js";
@@ -112,7 +117,11 @@ export function createServer(opts: ServerOptions): Server {
 	});
 	let cleanup: CleanupHandle | null = null;
 
-	const app = Fastify({ logger: opts.logger ?? false });
+	const app = Fastify({
+		logger: opts.logger ?? false,
+		// SSE long-poll 이 graceful shutdown 을 무한정 막지 않도록 keep-alive 강제 종료
+		forceCloseConnections: true,
+	});
 
 	app.post<{ Body: RegisterRequest }>(
 		HTTP_ENDPOINTS.register.path,
@@ -151,6 +160,87 @@ export function createServer(opts: ServerOptions): Server {
 		HTTP_ENDPOINTS.listPeers.path,
 		{ schema: { body: LIST_PEERS_BODY } },
 		async () => ({ ok: true, ...broker.listPeers() }),
+	);
+
+	app.get<{ Params: { topicId: string } }>(
+		"/tail/:topicId",
+		async (req, reply) => {
+			const { topicId } = req.params;
+			const session = db.getSession(topicId);
+			if (!session) {
+				const code: ErrorCode = "TOPIC_NOT_FOUND";
+				reply.code(errorCodeToHttpStatus[code]).send({
+					ok: false,
+					error: { code, message: `topic '${topicId}' is not registered` },
+				});
+				return;
+			}
+
+			reply.hijack();
+			const raw = reply.raw;
+			raw.writeHead(200, {
+				"Content-Type": "text/event-stream",
+				"Cache-Control": "no-cache, no-transform",
+				Connection: "keep-alive",
+				"X-Accel-Buffering": "no",
+			});
+
+			let closed = false;
+			const cleanup = (): void => {
+				if (closed) return;
+				closed = true;
+				clearInterval(heartbeat);
+				broker.events.off("message_sent", listener);
+			};
+			// EPIPE 등 write 실패 시 cleanup 만 수행하고 throw 막음
+			const safeWrite = (chunk: string): void => {
+				try {
+					raw.write(chunk);
+				} catch {
+					cleanup();
+				}
+			};
+
+			safeWrite(
+				serializeSseEvent({
+					type: "heartbeat",
+					at: new Date().toISOString(),
+				}),
+			);
+
+			const listener = (event: MessageSentEvent): void => {
+				if (event.message.to !== topicId) return;
+				safeWrite(
+					serializeSseEvent({
+						type: "message_delivered",
+						message: event.message,
+					}),
+				);
+			};
+			broker.events.on("message_sent", listener);
+
+			const heartbeat = setInterval(() => {
+				safeWrite(
+					serializeSseEvent({
+						type: "heartbeat",
+						at: new Date().toISOString(),
+					}),
+				);
+			}, SSE_HEARTBEAT_INTERVAL_SEC * 1000);
+			heartbeat.unref();
+
+			raw.on("close", () => {
+				cleanup();
+				try {
+					broker.disconnect(topicId);
+				} catch (e) {
+					// 서버 shutdown 후 socket close 가 늦게 도착하면 db 가 닫혀있는 race 만 무시.
+					// 그 외 예외는 진짜 버그이므로 로깅하지 않고 다시 던져서 에러 핸들러에 노출.
+					const msg = e instanceof Error ? e.message : String(e);
+					if (!msg.includes("database connection is not open")) throw e;
+				}
+			});
+		},
 	);
 
 	app.setErrorHandler((err: FastifyError, _req, reply) => {
