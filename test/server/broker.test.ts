@@ -158,6 +158,54 @@ describe("broker", () => {
 		);
 	});
 
+	test("unregister: throws TOPIC_NOT_FOUND for unknown topic", () => {
+		assert.throws(
+			() => broker.unregister("ghost", { topicId: "ghost" }),
+			(err: unknown) =>
+				err instanceof BrokerError && err.code === "TOPIC_NOT_FOUND",
+		);
+	});
+
+	test("unregister: purgeQueue=false preserves messages", () => {
+		broker.register({ topicId: "alice" });
+		broker.register({ topicId: "bob" });
+		broker.send({ from: "alice", to: "bob", subject: "s", body: "b" });
+		const result = broker.unregister("bob", {
+			topicId: "bob",
+			purgeQueue: false,
+		});
+		assert.equal(result.purged, false);
+		broker.register({ topicId: "bob" });
+		const peers = broker.listPeers().peers;
+		const bob = peers.find((p) => p.topicId === "bob");
+		assert.equal(bob?.queueLength, 1, "queued message survives unregister");
+	});
+
+	test("unregister: purgeQueue=true drops queued messages", () => {
+		broker.register({ topicId: "alice" });
+		broker.register({ topicId: "bob" });
+		broker.send({ from: "alice", to: "bob", subject: "s", body: "b" });
+		const result = broker.unregister("bob", {
+			topicId: "bob",
+			purgeQueue: true,
+		});
+		assert.equal(result.purged, true);
+		broker.register({ topicId: "bob" });
+		const peers = broker.listPeers().peers;
+		const bob = peers.find((p) => p.topicId === "bob");
+		assert.equal(bob?.queueLength, 0, "queue purged");
+	});
+
+	test("unregister: emits session_disconnected", () => {
+		broker.register({ topicId: "alice" });
+		let received: unknown = null;
+		broker.events.on("session_disconnected", (e) => {
+			received = e;
+		});
+		broker.unregister("alice", { topicId: "alice" });
+		assert.ok(received);
+	});
+
 	test("listener throw does not crash broker.emit", () => {
 		broker.events.on("session_registered", () => {
 			throw new Error("listener fail");

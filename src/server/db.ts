@@ -123,8 +123,19 @@ export function openDatabase(dbPath: string) {
 	const stmtTouchLastSeen = db.prepare<[string, string]>(
 		"UPDATE sessions SET last_seen_at = ? WHERE topic_id = ?",
 	);
-	const stmtListSessions = db.prepare<[], SessionRow>(
-		"SELECT * FROM sessions ORDER BY connected_at ASC",
+	const stmtListSessionsWithQueue = db.prepare<
+		[],
+		SessionRow & { queue_length: number }
+	>(
+		`SELECT s.*, COALESCE(q.cnt, 0) AS queue_length
+		 FROM sessions s
+		 LEFT JOIN (
+		   SELECT to_topic, COUNT(*) AS cnt
+		   FROM messages
+		   WHERE acked_at IS NULL
+		   GROUP BY to_topic
+		 ) q ON q.to_topic = s.topic_id
+		 ORDER BY s.connected_at ASC`,
 	);
 	const stmtCountQueue = db.prepare<[string], { c: number }>(
 		"SELECT COUNT(*) AS c FROM messages WHERE to_topic = ? AND acked_at IS NULL",
@@ -177,9 +188,13 @@ export function openDatabase(dbPath: string) {
 		} else {
 			stmtInsertSession.run(topicId, now, now, SessionStatus.CONNECTED);
 		}
-		const row = stmtGetSession.get(topicId);
-		if (!row) throw new Error("INTERNAL_ERROR");
-		return rowToPeer(row, stmtCountQueue.get(topicId)?.c ?? 0);
+		return {
+			topicId,
+			status: SessionStatus.CONNECTED,
+			connectedAt: now,
+			lastSeenAt: now,
+			queueLength: stmtCountQueue.get(topicId)?.c ?? 0,
+		};
 	}
 
 	const unregisterTx = db.transaction(
@@ -205,10 +220,8 @@ export function openDatabase(dbPath: string) {
 	}
 
 	function listSessions(): PeerDto[] {
-		const rows = stmtListSessions.all();
-		return rows.map((r) =>
-			rowToPeer(r, stmtCountQueue.get(r.topic_id)?.c ?? 0),
-		);
+		const rows = stmtListSessionsWithQueue.all();
+		return rows.map((r) => rowToPeer(r, r.queue_length));
 	}
 
 	function insertMessage(msg: MessageDto): void {
@@ -246,7 +259,8 @@ export function openDatabase(dbPath: string) {
 	): IsoTimestamp {
 		const row = stmtGetMessage.get(messageId, topicId);
 		if (!row) throw new DbError("MESSAGE_NOT_FOUND");
-		if (row.in_flight_until === null) throw new DbError("MESSAGE_NOT_IN_FLIGHT");
+		if (row.in_flight_until === null)
+			throw new DbError("MESSAGE_NOT_IN_FLIGHT");
 		stmtAckMessage.run(now, messageId);
 		return now;
 	}
