@@ -22,6 +22,7 @@ export interface TailHeartbeatEvent {
 export type TailEvent = MessageDeliveredEvent | TailHeartbeatEvent;
 
 export const DASHBOARD_EVENT_TYPES = {
+	sessionSnapshot: "session_snapshot",
 	sessionRegistered: "session_registered",
 	sessionDisconnected: "session_disconnected",
 	messageSent: "message_sent",
@@ -31,6 +32,12 @@ export const DASHBOARD_EVENT_TYPES = {
 	messageExpired: "message_expired",
 	heartbeat: "heartbeat",
 } as const;
+
+export interface SessionSnapshotEvent {
+	type: "session_snapshot";
+	peers: PeerDto[];
+	at: IsoTimestamp;
+}
 
 export interface SessionRegisteredEvent {
 	type: "session_registered";
@@ -73,6 +80,7 @@ export interface DashboardHeartbeatEvent {
 }
 
 export type DashboardEvent =
+	| SessionSnapshotEvent
 	| SessionRegisteredEvent
 	| SessionDisconnectedEvent
 	| MessageSentEvent
