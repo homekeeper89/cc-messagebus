@@ -106,7 +106,7 @@ export async function runMcp(opts: RunMcpOptions = {}): Promise<void> {
 	const spawnCmd = opts.spawnCmd ?? defaultSpawnCmd();
 
 	const server = new Server(
-		{ name: "cc-messagebus", version: "0.0.0" },
+		{ name: "cc-messagebus", version: "0.0.1" },
 		{ capabilities: { tools: {} } },
 	);
 
