@@ -1,7 +1,7 @@
 {
 	"name": "cc-messagebus",
 	"description": "Cross-session message bus for Claude Code with central observability",
-	"version": "0.0.0",
+	"version": "0.0.1",
 	"mcpServers": {
 		"cc-messagebus": {
 			"command": "npx",
