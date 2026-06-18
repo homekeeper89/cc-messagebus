@@ -1,6 +1,13 @@
 import Fastify, { type FastifyError, type FastifyInstance } from "fastify";
 import { type ErrorCode, errorCodeToHttpStatus } from "../protocol/errors.js";
-import { HTTP_ENDPOINTS } from "../protocol/http.js";
+import {
+	type AckRequest,
+	HTTP_ENDPOINTS,
+	type ReadRequest,
+	type RegisterRequest,
+	type SendRequest,
+	type UnregisterRequest,
+} from "../protocol/http.js";
 import { type Broker, BrokerError, createBroker } from "./broker.js";
 import { type CleanupHandle, startCleanup } from "./cleanup.js";
 import { type CcDatabase, openDatabase } from "./db.js";
@@ -107,37 +114,37 @@ export function createServer(opts: ServerOptions): Server {
 
 	const app = Fastify({ logger: opts.logger ?? false });
 
-	app.post(
+	app.post<{ Body: RegisterRequest }>(
 		HTTP_ENDPOINTS.register.path,
 		{ schema: { body: REGISTER_BODY } },
-		async (req) => ({ ok: true, ...broker.register(req.body as never) }),
+		async (req) => ({ ok: true, ...broker.register(req.body) }),
 	);
 
-	app.post(
+	app.post<{ Body: UnregisterRequest }>(
 		HTTP_ENDPOINTS.unregister.path,
 		{ schema: { body: UNREGISTER_BODY } },
-		async (req) => {
-			const body = req.body as { topicId: string; purgeQueue?: boolean };
-			return { ok: true, ...broker.unregister(body.topicId, body) };
-		},
+		async (req) => ({
+			ok: true,
+			...broker.unregister(req.body.topicId, req.body),
+		}),
 	);
 
-	app.post(
+	app.post<{ Body: SendRequest }>(
 		HTTP_ENDPOINTS.send.path,
 		{ schema: { body: SEND_BODY } },
-		async (req) => ({ ok: true, ...broker.send(req.body as never) }),
+		async (req) => ({ ok: true, ...broker.send(req.body) }),
 	);
 
-	app.post(
+	app.post<{ Body: ReadRequest }>(
 		HTTP_ENDPOINTS.read.path,
 		{ schema: { body: READ_BODY } },
-		async (req) => ({ ok: true, ...broker.read(req.body as never) }),
+		async (req) => ({ ok: true, ...broker.read(req.body) }),
 	);
 
-	app.post(
+	app.post<{ Body: AckRequest }>(
 		HTTP_ENDPOINTS.ack.path,
 		{ schema: { body: ACK_BODY } },
-		async (req) => ({ ok: true, ...broker.ack(req.body as never) }),
+		async (req) => ({ ok: true, ...broker.ack(req.body) }),
 	);
 
 	app.post(

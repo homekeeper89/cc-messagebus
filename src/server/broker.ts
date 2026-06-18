@@ -12,11 +12,12 @@ import type {
 	RegisterResponse,
 	SendRequest,
 	SendResponse,
+	TopicId,
 	UnregisterRequest,
 	UnregisterResponse,
 } from "../protocol/http.js";
 import type { DashboardEvent } from "../protocol/sse.js";
-import type { CcDatabase } from "./db.js";
+import { type CcDatabase, DbError } from "./db.js";
 
 export class BrokerError extends Error {
 	constructor(
@@ -35,6 +36,17 @@ export interface BrokerOptions {
 	dashboardUrl: string;
 }
 
+export interface Broker {
+	events: EventEmitter;
+	register: (req: RegisterRequest) => RegisterResponse;
+	unregister: (topicId: TopicId, req: UnregisterRequest) => UnregisterResponse;
+	send: (req: SendRequest) => SendResponse;
+	read: (req: ReadRequest) => ReadResponse;
+	ack: (req: AckRequest) => AckResponse;
+	listPeers: () => ListPeersResponse;
+	disconnect: (topicId: TopicId) => void;
+}
+
 const READ_MAX_DEFAULT = 50;
 const MS_PER_DAY = 24 * 60 * 60 * 1000;
 const MS_PER_SEC = 1000;
@@ -51,7 +63,7 @@ function plusDays(iso: string, days: number): string {
 	return new Date(new Date(iso).getTime() + days * MS_PER_DAY).toISOString();
 }
 
-export function createBroker(db: CcDatabase, opts: BrokerOptions) {
+export function createBroker(db: CcDatabase, opts: BrokerOptions): Broker {
 	const events = new EventEmitter();
 	events.on("error", () => {});
 
@@ -69,7 +81,7 @@ export function createBroker(db: CcDatabase, opts: BrokerOptions) {
 		try {
 			peer = db.registerSession(req.topicId, now);
 		} catch (e) {
-			if (e instanceof Error && e.message === "TOPIC_ALREADY_REGISTERED") {
+			if (e instanceof DbError && e.code === "TOPIC_ALREADY_REGISTERED") {
 				throw new BrokerError(
 					"TOPIC_ALREADY_REGISTERED",
 					`topic '${req.topicId}' is already connected`,
@@ -172,14 +184,14 @@ export function createBroker(db: CcDatabase, opts: BrokerOptions) {
 		try {
 			ackedAt = db.ackMessage(req.topicId, req.messageId, now);
 		} catch (e) {
-			if (e instanceof Error) {
-				if (e.message === "MESSAGE_NOT_FOUND") {
+			if (e instanceof DbError) {
+				if (e.code === "MESSAGE_NOT_FOUND") {
 					throw new BrokerError(
 						"MESSAGE_NOT_FOUND",
 						`message '${req.messageId}' not found for topic '${req.topicId}'`,
 					);
 				}
-				if (e.message === "MESSAGE_NOT_IN_FLIGHT") {
+				if (e.code === "MESSAGE_NOT_IN_FLIGHT") {
 					throw new BrokerError(
 						"MESSAGE_NOT_IN_FLIGHT",
 						`message '${req.messageId}' is not in-flight (already acked or never read)`,
@@ -221,5 +233,3 @@ export function createBroker(db: CcDatabase, opts: BrokerOptions) {
 		disconnect,
 	};
 }
-
-export type Broker = ReturnType<typeof createBroker>;
