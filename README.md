@@ -24,7 +24,21 @@ npx cc-messagebus serve
 
 ## Quick Start
 
-### 1) MCP 등록 — `.claude/settings.json`
+### 1) MCP 등록
+
+두 방식 중 하나를 선택하세요. 등록 후 첫 `register` 호출 시 broker daemon이 자동으로 spawn 되고, 응답의 `monitorCommand` 를 Claude가 `Monitor` 도구로 실행해 수신 알림 채널까지 자동 구성됩니다.
+
+#### A. Plugin 설치 (권장)
+
+```
+/plugin install homekeeper89/cc-messagebus
+```
+
+`.claude-plugin/plugin.json` 이 자동 로드되어 MCP 서버가 활성화됩니다. settings.json 편집 불필요.
+
+#### B. settings.json 수동 등록
+
+`.claude/settings.json` 에 추가:
 
 ```json
 {
@@ -36,8 +50,6 @@ npx cc-messagebus serve
   }
 }
 ```
-
-이게 끝입니다. 첫 `register` 호출 시 broker daemon이 자동으로 spawn 되고, 응답의 `monitorCommand` 를 Claude가 `Monitor` 도구로 실행해 수신 알림 채널까지 자동 구성됩니다.
 
 ### 2) 세션 흐름 예시
 
