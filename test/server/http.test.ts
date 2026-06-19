@@ -592,6 +592,70 @@ describe("tail SSE", () => {
 		}
 	});
 
+	test("GET /tail/:topicId pushes message_delivered on channel_send fan-out", async () => {
+		await fetch(`${baseUrl}/api/register`, {
+			method: "POST",
+			headers: { "content-type": "application/json" },
+			body: JSON.stringify({ topicId: "alice" }),
+		});
+		await fetch(`${baseUrl}/api/register`, {
+			method: "POST",
+			headers: { "content-type": "application/json" },
+			body: JSON.stringify({ topicId: "bob" }),
+		});
+		await fetch(`${baseUrl}/api/channel_create`, {
+			method: "POST",
+			headers: { "content-type": "application/json" },
+			body: JSON.stringify({ channelId: "ch-tail", createdBy: "alice" }),
+		});
+		await fetch(`${baseUrl}/api/channel_subscribe`, {
+			method: "POST",
+			headers: { "content-type": "application/json" },
+			body: JSON.stringify({ channelId: "ch-tail", topicId: "bob" }),
+		});
+
+		const controller = new AbortController();
+		try {
+			const res = await fetch(`${baseUrl}/tail/bob`, {
+				signal: controller.signal,
+				headers: { Accept: "text/event-stream" },
+			});
+			assert.equal(res.status, 200);
+			assert.ok(res.body, "expected response body stream");
+			const reader = res.body.getReader();
+			const decoder = new TextDecoder();
+
+			await readOneEvent(reader, decoder, (e) => e.type === "heartbeat");
+
+			await fetch(`${baseUrl}/api/channel_send`, {
+				method: "POST",
+				headers: { "content-type": "application/json" },
+				body: JSON.stringify({
+					channelId: "ch-tail",
+					from: "alice",
+					subject: "epic-update",
+					body: "channel fan-out test",
+				}),
+			});
+
+			const delivered = await readOneEvent(
+				reader,
+				decoder,
+				(e) => e.type === "message_delivered",
+			);
+			const msg = (
+				delivered as {
+					message: { to: string; from: string; subject: string };
+				}
+			).message;
+			assert.equal(msg.to, "bob");
+			assert.equal(msg.from, "alice");
+			assert.equal(msg.subject, "epic-update");
+		} finally {
+			controller.abort();
+		}
+	});
+
 	test("GET /tail/:topicId close marks peer disconnected", async () => {
 		await fetch(`${baseUrl}/api/register`, {
 			method: "POST",
