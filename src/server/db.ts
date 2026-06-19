@@ -384,6 +384,12 @@ export function openDatabase(dbPath: string) {
 		stmtInsertChannel.run(channelId, now, createdBy);
 	}
 
+	function listChannelSubscribers(channelId: string): TopicId[] {
+		return stmtListChannelSubscribers
+			.all(channelId)
+			.map((r) => r.subscriber_topic_id);
+	}
+
 	function subscribeChannel(
 		channelId: string,
 		subscriberTopicId: TopicId,
@@ -467,6 +473,7 @@ export function openDatabase(dbPath: string) {
 		deleteExpired,
 		createChannel,
 		subscribeChannel,
+		listChannelSubscribers,
 		channelSend: (input: ChannelSendInput) => channelSendTx(input),
 		close: (): void => {
 			db.close();
