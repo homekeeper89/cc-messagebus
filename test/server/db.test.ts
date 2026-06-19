@@ -193,16 +193,14 @@ describe("channels", () => {
 	test("createChannel inserts new channel and rejects duplicates", () => {
 		db.createChannel("epic-1", "saturn", "2026-06-19T00:00:00.000Z");
 		assert.throws(
-			() =>
-				db.createChannel("epic-1", "saturn", "2026-06-19T00:00:01.000Z"),
+			() => db.createChannel("epic-1", "saturn", "2026-06-19T00:00:01.000Z"),
 			/CHANNEL_ALREADY_EXISTS/,
 		);
 	});
 
 	test("subscribeChannel throws CHANNEL_NOT_FOUND for unknown channel", () => {
 		assert.throws(
-			() =>
-				db.subscribeChannel("nope", "saturn", "2026-06-19T00:00:00.000Z"),
+			() => db.subscribeChannel("nope", "saturn", "2026-06-19T00:00:00.000Z"),
 			/CHANNEL_NOT_FOUND/,
 		);
 	});
@@ -211,12 +209,7 @@ describe("channels", () => {
 		db.createChannel("epic-1", "saturn", "2026-06-19T00:00:00.000Z");
 		db.subscribeChannel("epic-1", "carme", "2026-06-19T00:00:01.000Z");
 		assert.throws(
-			() =>
-				db.subscribeChannel(
-					"epic-1",
-					"carme",
-					"2026-06-19T00:00:02.000Z",
-				),
+			() => db.subscribeChannel("epic-1", "carme", "2026-06-19T00:00:02.000Z"),
 			/ALREADY_SUBSCRIBED/,
 		);
 	});
@@ -302,8 +295,7 @@ describe("channels", () => {
 		const db2 = openDatabase(dbPath);
 		assert.ok(db2);
 		assert.throws(
-			() =>
-				db2.createChannel("epic-1", "saturn", "2026-06-19T00:00:01.000Z"),
+			() => db2.createChannel("epic-1", "saturn", "2026-06-19T00:00:01.000Z"),
 			/CHANNEL_ALREADY_EXISTS/,
 		);
 		db2.close();
