@@ -302,6 +302,176 @@ describe("http", () => {
 		});
 		assert.equal(read.json().messages.length, 1);
 	});
+
+	test("POST /api/channel_create returns ok + channelId", async () => {
+		await server.app.inject({
+			method: "POST",
+			url: "/api/register",
+			payload: { topicId: "alice" },
+		});
+		const res = await server.app.inject({
+			method: "POST",
+			url: "/api/channel_create",
+			payload: { channelId: "general", createdBy: "alice" },
+		});
+		assert.equal(res.statusCode, 200);
+		const body = res.json();
+		assert.equal(body.ok, true);
+		assert.equal(body.channel.channelId, "general");
+		assert.equal(body.channel.createdBy, "alice");
+	});
+
+	test("POST /api/channel_create duplicate returns 409 + CHANNEL_ALREADY_EXISTS", async () => {
+		await server.app.inject({
+			method: "POST",
+			url: "/api/register",
+			payload: { topicId: "alice" },
+		});
+		await server.app.inject({
+			method: "POST",
+			url: "/api/channel_create",
+			payload: { channelId: "general", createdBy: "alice" },
+		});
+		const res = await server.app.inject({
+			method: "POST",
+			url: "/api/channel_create",
+			payload: { channelId: "general", createdBy: "alice" },
+		});
+		assert.equal(res.statusCode, 409);
+		const body = res.json();
+		assert.equal(body.ok, false);
+		assert.equal(body.error.code, "CHANNEL_ALREADY_EXISTS");
+	});
+
+	test("POST /api/channel_create empty channelId returns 400 + VALIDATION_FAILED", async () => {
+		await server.app.inject({
+			method: "POST",
+			url: "/api/register",
+			payload: { topicId: "alice" },
+		});
+		const res = await server.app.inject({
+			method: "POST",
+			url: "/api/channel_create",
+			payload: { channelId: "", createdBy: "alice" },
+		});
+		assert.equal(res.statusCode, 400);
+		assert.equal(res.json().error.code, "VALIDATION_FAILED");
+	});
+
+	test("POST /api/channel_subscribe returns ok", async () => {
+		await server.app.inject({
+			method: "POST",
+			url: "/api/register",
+			payload: { topicId: "alice" },
+		});
+		await server.app.inject({
+			method: "POST",
+			url: "/api/register",
+			payload: { topicId: "bob" },
+		});
+		await server.app.inject({
+			method: "POST",
+			url: "/api/channel_create",
+			payload: { channelId: "general", createdBy: "alice" },
+		});
+		const res = await server.app.inject({
+			method: "POST",
+			url: "/api/channel_subscribe",
+			payload: { channelId: "general", topicId: "bob" },
+		});
+		assert.equal(res.statusCode, 200);
+		assert.equal(res.json().ok, true);
+	});
+
+	test("POST /api/channel_subscribe duplicate returns 409 + ALREADY_SUBSCRIBED", async () => {
+		await server.app.inject({
+			method: "POST",
+			url: "/api/register",
+			payload: { topicId: "alice" },
+		});
+		await server.app.inject({
+			method: "POST",
+			url: "/api/register",
+			payload: { topicId: "bob" },
+		});
+		await server.app.inject({
+			method: "POST",
+			url: "/api/channel_create",
+			payload: { channelId: "general", createdBy: "alice" },
+		});
+		await server.app.inject({
+			method: "POST",
+			url: "/api/channel_subscribe",
+			payload: { channelId: "general", topicId: "bob" },
+		});
+		const res = await server.app.inject({
+			method: "POST",
+			url: "/api/channel_subscribe",
+			payload: { channelId: "general", topicId: "bob" },
+		});
+		assert.equal(res.statusCode, 409);
+		assert.equal(res.json().error.code, "ALREADY_SUBSCRIBED");
+	});
+
+	test("POST /api/channel_send fan-out delivers to N-1 subscribers", async () => {
+		for (const topicId of ["alice", "bob", "carol"]) {
+			await server.app.inject({
+				method: "POST",
+				url: "/api/register",
+				payload: { topicId },
+			});
+		}
+		await server.app.inject({
+			method: "POST",
+			url: "/api/channel_create",
+			payload: { channelId: "general", createdBy: "alice" },
+		});
+		for (const topicId of ["bob", "carol"]) {
+			await server.app.inject({
+				method: "POST",
+				url: "/api/channel_subscribe",
+				payload: { channelId: "general", topicId },
+			});
+		}
+		const res = await server.app.inject({
+			method: "POST",
+			url: "/api/channel_send",
+			payload: {
+				channelId: "general",
+				from: "alice",
+				subject: "hello",
+				body: "world",
+			},
+		});
+		assert.equal(res.statusCode, 200);
+		const body = res.json();
+		assert.equal(body.ok, true);
+		assert.ok(body.channelMessageId);
+		assert.equal(body.deliveredTo.length, 2);
+		assert.ok(body.deliveredTo.includes("bob"));
+		assert.ok(body.deliveredTo.includes("carol"));
+		assert.ok(!body.deliveredTo.includes("alice"));
+	});
+
+	test("POST /api/channel_send unknown channel returns 404 + CHANNEL_NOT_FOUND", async () => {
+		await server.app.inject({
+			method: "POST",
+			url: "/api/register",
+			payload: { topicId: "alice" },
+		});
+		const res = await server.app.inject({
+			method: "POST",
+			url: "/api/channel_send",
+			payload: {
+				channelId: "ghost",
+				from: "alice",
+				subject: "s",
+				body: "b",
+			},
+		});
+		assert.equal(res.statusCode, 404);
+		assert.equal(res.json().error.code, "CHANNEL_NOT_FOUND");
+	});
 });
 
 describe("tail SSE", () => {
