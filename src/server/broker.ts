@@ -343,6 +343,21 @@ export function createBroker(db: CcDatabase, opts: BrokerOptions): Broker {
 			throw e;
 		}
 		db.touchLastSeen(req.from, now);
+		result.deliveredTo.forEach((subscriberId, i) => {
+			const fanoutMessage: MessageDto = {
+				id: deliveryMessageIds[i] as MessageId,
+				from: req.from,
+				to: subscriberId,
+				subject: req.subject,
+				body: req.body,
+				threadId: null,
+				sentAt: now,
+				inFlightUntil: null,
+				ackedAt: null,
+				expiresAt,
+			};
+			emit({ type: "message_sent", message: fanoutMessage });
+		});
 		emit({
 			type: "channel_message_published",
 			channelId: req.channelId,
