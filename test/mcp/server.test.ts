@@ -72,9 +72,9 @@ function makeMockClient(overrides: Partial<BrokerClient> = {}): {
 const noopSpawn: SpawnCmd = { exe: "/bin/true", args: [] };
 
 describe("mcp/server.buildToolList", () => {
-	it("returns all 6 tools matching protocol/mcp.ts", () => {
+	it("returns all tools matching protocol/mcp.ts", () => {
 		const tools = buildToolList();
-		assert.equal(tools.length, 6);
+		assert.equal(tools.length, 11);
 		const keys = Object.keys(MCP_TOOL_NAMES) as McpToolKey[];
 		for (const key of keys) {
 			const found = tools.find((t) => t.name === MCP_TOOL_NAMES[key]);
