@@ -288,5 +288,38 @@ describe("broker channels", () => {
 			assert.deepEqual(event.deliveredTo, result.deliveredTo);
 			assert.equal(event.sentAt, result.sentAt);
 		});
+
+		test("fan-out emits message_sent per subscriber copy", () => {
+			broker.register({ topicId: "alice" });
+			broker.register({ topicId: "bob" });
+			broker.register({ topicId: "carol" });
+			broker.channelCreate({ channelId: "ch-1", createdBy: "alice" });
+			broker.channelSubscribe({ channelId: "ch-1", topicId: "bob" });
+			broker.channelSubscribe({ channelId: "ch-1", topicId: "carol" });
+
+			const received: string[] = [];
+			broker.events.on("message_sent", (e) => {
+				received.push(e.message.to);
+			});
+
+			broker.channelSend({
+				channelId: "ch-1",
+				from: "alice",
+				subject: "hi",
+				body: "x",
+			});
+
+			assert.equal(
+				received.length,
+				2,
+				"two subscribers must each get a message_sent",
+			);
+			assert.ok(received.includes("bob"));
+			assert.ok(received.includes("carol"));
+			assert.ok(
+				!received.includes("alice"),
+				"sender must not receive own message_sent",
+			);
+		});
 	});
 });
