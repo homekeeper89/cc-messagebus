@@ -4,8 +4,17 @@ import type { ErrorCode } from "../protocol/errors.js";
 import type {
 	AckRequest,
 	AckResponse,
+	ChannelCreateRequest,
+	ChannelCreateResponse,
+	ChannelDto,
+	ChannelMessageId,
+	ChannelSendRequest,
+	ChannelSendResponse,
+	ChannelSubscribeRequest,
+	ChannelSubscribeResponse,
 	ListPeersResponse,
 	MessageDto,
+	MessageId,
 	ReadRequest,
 	ReadResponse,
 	RegisterRequest,
@@ -45,6 +54,9 @@ export interface Broker {
 	ack: (req: AckRequest) => AckResponse;
 	listPeers: () => ListPeersResponse;
 	disconnect: (topicId: TopicId) => void;
+	channelCreate: (req: ChannelCreateRequest) => ChannelCreateResponse;
+	channelSubscribe: (req: ChannelSubscribeRequest) => ChannelSubscribeResponse;
+	channelSend: (req: ChannelSendRequest) => ChannelSendResponse;
 }
 
 const READ_MAX_DEFAULT = 50;
@@ -225,6 +237,127 @@ export function createBroker(db: CcDatabase, opts: BrokerOptions): Broker {
 		emit({ type: "session_disconnected", topicId, at: now });
 	}
 
+	function channelCreate(req: ChannelCreateRequest): ChannelCreateResponse {
+		const creator = db.getSession(req.createdBy);
+		if (!creator) {
+			throw new BrokerError(
+				"TOPIC_NOT_FOUND",
+				`creator topic '${req.createdBy}' is not registered`,
+			);
+		}
+		const now = nowIso();
+		try {
+			db.createChannel(req.channelId, req.createdBy, now);
+		} catch (e) {
+			if (e instanceof DbError && e.code === "CHANNEL_ALREADY_EXISTS") {
+				throw new BrokerError(
+					"CHANNEL_ALREADY_EXISTS",
+					`channel '${req.channelId}' already exists`,
+				);
+			}
+			throw e;
+		}
+		const channel: ChannelDto = {
+			channelId: req.channelId,
+			createdBy: req.createdBy,
+			createdAt: now,
+		};
+		db.touchLastSeen(req.createdBy, now);
+		emit({ type: "channel_created", channel });
+		return { channel };
+	}
+
+	function channelSubscribe(
+		req: ChannelSubscribeRequest,
+	): ChannelSubscribeResponse {
+		const subscriber = db.getSession(req.topicId);
+		if (!subscriber) {
+			throw new BrokerError(
+				"TOPIC_NOT_FOUND",
+				`subscriber topic '${req.topicId}' is not registered`,
+			);
+		}
+		const now = nowIso();
+		try {
+			db.subscribeChannel(req.channelId, req.topicId, now);
+		} catch (e) {
+			if (e instanceof DbError && e.code === "CHANNEL_NOT_FOUND") {
+				throw new BrokerError(
+					"CHANNEL_NOT_FOUND",
+					`channel '${req.channelId}' not found`,
+				);
+			}
+			if (e instanceof DbError && e.code === "ALREADY_SUBSCRIBED") {
+				throw new BrokerError(
+					"ALREADY_SUBSCRIBED",
+					`topic '${req.topicId}' already subscribed to '${req.channelId}'`,
+				);
+			}
+			throw e;
+		}
+		db.touchLastSeen(req.topicId, now);
+		emit({
+			type: "channel_subscribed",
+			channelId: req.channelId,
+			topicId: req.topicId,
+			at: now,
+		});
+		return { subscribedAt: now };
+	}
+
+	function channelSend(req: ChannelSendRequest): ChannelSendResponse {
+		const sender = db.getSession(req.from);
+		if (!sender) {
+			throw new BrokerError(
+				"TOPIC_NOT_FOUND",
+				`sender topic '${req.from}' is not registered`,
+			);
+		}
+		const allSubs = db.listChannelSubscribers(req.channelId);
+		const deliverTo = allSubs.filter((s) => s !== req.from);
+		const now = nowIso();
+		const expiresAt = plusDays(now, opts.ttlDays);
+		const channelMessageId = randomUUID() as ChannelMessageId;
+		const deliveryMessageIds: MessageId[] = deliverTo.map(
+			() => randomUUID() as MessageId,
+		);
+		let result: { deliveredTo: TopicId[] };
+		try {
+			result = db.channelSend({
+				channelMessageId,
+				channelId: req.channelId,
+				from: req.from,
+				subject: req.subject,
+				body: req.body,
+				sentAt: now,
+				expiresAt,
+				deliveryMessageIds,
+			});
+		} catch (e) {
+			if (e instanceof DbError && e.code === "CHANNEL_NOT_FOUND") {
+				throw new BrokerError(
+					"CHANNEL_NOT_FOUND",
+					`channel '${req.channelId}' not found`,
+				);
+			}
+			throw e;
+		}
+		db.touchLastSeen(req.from, now);
+		emit({
+			type: "channel_message_published",
+			channelId: req.channelId,
+			channelMessageId,
+			from: req.from,
+			deliveredTo: result.deliveredTo,
+			sentAt: now,
+		});
+		return {
+			channelMessageId,
+			deliveredTo: result.deliveredTo,
+			sentAt: now,
+		};
+	}
+
 	return {
 		events,
 		register,
@@ -234,5 +367,8 @@ export function createBroker(db: CcDatabase, opts: BrokerOptions): Broker {
 		ack,
 		listPeers,
 		disconnect,
+		channelCreate,
+		channelSubscribe,
+		channelSend,
 	};
 }
