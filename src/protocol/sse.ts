@@ -1,4 +1,7 @@
 import type {
+	ChannelDto,
+	ChannelId,
+	ChannelMessageId,
 	IsoTimestamp,
 	MessageDto,
 	MessageId,
@@ -31,6 +34,10 @@ export const DASHBOARD_EVENT_TYPES = {
 	messageRedelivered: "message_redelivered",
 	messageExpired: "message_expired",
 	heartbeat: "heartbeat",
+	channelCreated: "channel_created",
+	channelSubscribed: "channel_subscribed",
+	channelUnsubscribed: "channel_unsubscribed",
+	channelMessagePublished: "channel_message_published",
 } as const;
 
 export interface SessionSnapshotEvent {
@@ -79,6 +86,31 @@ export interface DashboardHeartbeatEvent {
 	at: IsoTimestamp;
 }
 
+export interface ChannelCreatedEvent {
+	type: "channel_created";
+	channel: ChannelDto;
+}
+export interface ChannelSubscribedEvent {
+	type: "channel_subscribed";
+	channelId: ChannelId;
+	topicId: TopicId;
+	at: IsoTimestamp;
+}
+export interface ChannelUnsubscribedEvent {
+	type: "channel_unsubscribed";
+	channelId: ChannelId;
+	topicId: TopicId;
+	at: IsoTimestamp;
+}
+export interface ChannelMessagePublishedEvent {
+	type: "channel_message_published";
+	channelId: ChannelId;
+	channelMessageId: ChannelMessageId;
+	from: TopicId;
+	deliveredTo: TopicId[];
+	sentAt: IsoTimestamp;
+}
+
 export type DashboardEvent =
 	| SessionSnapshotEvent
 	| SessionRegisteredEvent
@@ -88,7 +120,11 @@ export type DashboardEvent =
 	| MessageAckedEvent
 	| MessageRedeliveredEvent
 	| MessageExpiredEvent
-	| DashboardHeartbeatEvent;
+	| DashboardHeartbeatEvent
+	| ChannelCreatedEvent
+	| ChannelSubscribedEvent
+	| ChannelUnsubscribedEvent
+	| ChannelMessagePublishedEvent;
 
 export const SSE_HEARTBEAT_INTERVAL_SEC = 15;
 
