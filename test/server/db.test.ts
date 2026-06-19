@@ -168,3 +168,137 @@ describe("db", () => {
 		assert.deepEqual(deleted, ["m-dead"]);
 	});
 });
+
+describe("channels", () => {
+	let tmpDir: string;
+	let dbPath: string;
+	let db: CcDatabase;
+
+	before(() => {
+		tmpDir = mkdtempSync(join(tmpdir(), "ccmb-ch-"));
+		dbPath = join(tmpDir, "data.db");
+	});
+
+	after(() => {
+		db?.close();
+		rmSync(tmpDir, { recursive: true, force: true });
+	});
+
+	beforeEach(() => {
+		db?.close();
+		rmSync(dbPath, { force: true });
+		db = openDatabase(dbPath);
+	});
+
+	test("createChannel inserts new channel and rejects duplicates", () => {
+		db.createChannel("epic-1", "saturn", "2026-06-19T00:00:00.000Z");
+		assert.throws(
+			() => db.createChannel("epic-1", "saturn", "2026-06-19T00:00:01.000Z"),
+			/CHANNEL_ALREADY_EXISTS/,
+		);
+	});
+
+	test("subscribeChannel throws CHANNEL_NOT_FOUND for unknown channel", () => {
+		assert.throws(
+			() => db.subscribeChannel("nope", "saturn", "2026-06-19T00:00:00.000Z"),
+			/CHANNEL_NOT_FOUND/,
+		);
+	});
+
+	test("subscribeChannel throws ALREADY_SUBSCRIBED on duplicate", () => {
+		db.createChannel("epic-1", "saturn", "2026-06-19T00:00:00.000Z");
+		db.subscribeChannel("epic-1", "carme", "2026-06-19T00:00:01.000Z");
+		assert.throws(
+			() => db.subscribeChannel("epic-1", "carme", "2026-06-19T00:00:02.000Z"),
+			/ALREADY_SUBSCRIBED/,
+		);
+	});
+
+	test("channelSend fans out to subscribers excluding sender", () => {
+		db.createChannel("epic-1", "saturn", "2026-06-19T00:00:00.000Z");
+		db.subscribeChannel("epic-1", "saturn", "2026-06-19T00:00:01.000Z");
+		db.subscribeChannel("epic-1", "carme", "2026-06-19T00:00:02.000Z");
+		db.subscribeChannel("epic-1", "europa", "2026-06-19T00:00:03.000Z");
+
+		const result = db.channelSend({
+			channelMessageId: "cm-1",
+			channelId: "epic-1",
+			from: "saturn",
+			subject: "plan-update",
+			body: "hello",
+			sentAt: "2026-06-19T00:00:04.000Z",
+			expiresAt: "2026-07-19T00:00:04.000Z",
+			deliveryMessageIds: ["m-1", "m-2"],
+		});
+
+		assert.equal(result.deliveredTo.length, 2);
+		assert.ok(!result.deliveredTo.includes("saturn"));
+
+		const now = "2026-06-19T00:00:05.000Z";
+		const inFlight = "2026-06-19T00:00:35.000Z";
+		assert.equal(db.fetchDeliverable("carme", 10, now, inFlight).length, 1);
+		assert.equal(db.fetchDeliverable("europa", 10, now, inFlight).length, 1);
+		assert.equal(db.fetchDeliverable("saturn", 10, now, inFlight).length, 0);
+	});
+
+	test("channelSend throws CHANNEL_NOT_FOUND for unknown channel", () => {
+		assert.throws(
+			() =>
+				db.channelSend({
+					channelMessageId: "cm-1",
+					channelId: "nope",
+					from: "saturn",
+					subject: "x",
+					body: "x",
+					sentAt: "2026-06-19T00:00:00.000Z",
+					expiresAt: "2026-07-19T00:00:00.000Z",
+					deliveryMessageIds: [],
+				}),
+			/CHANNEL_NOT_FOUND/,
+		);
+	});
+
+	test("channelSend rolls back canonical insert when deliveryMessageIds count mismatches", () => {
+		db.createChannel("epic-1", "saturn", "2026-06-19T00:00:00.000Z");
+		db.subscribeChannel("epic-1", "carme", "2026-06-19T00:00:01.000Z");
+		db.subscribeChannel("epic-1", "europa", "2026-06-19T00:00:02.000Z");
+
+		assert.throws(() =>
+			db.channelSend({
+				channelMessageId: "cm-1",
+				channelId: "epic-1",
+				from: "saturn",
+				subject: "x",
+				body: "x",
+				sentAt: "2026-06-19T00:00:03.000Z",
+				expiresAt: "2026-07-19T00:00:03.000Z",
+				deliveryMessageIds: ["m-1"],
+			}),
+		);
+
+		const result = db.channelSend({
+			channelMessageId: "cm-1",
+			channelId: "epic-1",
+			from: "saturn",
+			subject: "x",
+			body: "x",
+			sentAt: "2026-06-19T00:00:04.000Z",
+			expiresAt: "2026-07-19T00:00:04.000Z",
+			deliveryMessageIds: ["m-1", "m-2"],
+		});
+		assert.equal(result.deliveredTo.length, 2);
+	});
+
+	test("openDatabase is idempotent on existing db (backward-compatible ALTER)", () => {
+		db.createChannel("epic-1", "saturn", "2026-06-19T00:00:00.000Z");
+		db.close();
+		const db2 = openDatabase(dbPath);
+		assert.ok(db2);
+		assert.throws(
+			() => db2.createChannel("epic-1", "saturn", "2026-06-19T00:00:01.000Z"),
+			/CHANNEL_ALREADY_EXISTS/,
+		);
+		db2.close();
+		db = openDatabase(dbPath);
+	});
+});
