@@ -21,6 +21,14 @@ interface CallLog {
 	read: { topicId: string; max?: number }[];
 	ack: { topicId: string; messageId: string }[];
 	listPeers: number;
+	channelCreate: { channelId: string; createdBy: string }[];
+	channelSubscribe: { channelId: string; topicId: string }[];
+	channelSend: {
+		channelId: string;
+		from: string;
+		subject: string;
+		body: string;
+	}[];
 }
 
 function makeMockClient(overrides: Partial<BrokerClient> = {}): {
@@ -34,6 +42,9 @@ function makeMockClient(overrides: Partial<BrokerClient> = {}): {
 		read: [],
 		ack: [],
 		listPeers: 0,
+		channelCreate: [],
+		channelSubscribe: [],
+		channelSend: [],
 	};
 	const client: BrokerClient = {
 		register: async (req) => {
@@ -63,6 +74,28 @@ function makeMockClient(overrides: Partial<BrokerClient> = {}): {
 		listPeers: async () => {
 			calls.listPeers += 1;
 			return { peers: [] };
+		},
+		channelCreate: async (req) => {
+			calls.channelCreate.push(req);
+			return {
+				channel: {
+					channelId: req.channelId,
+					createdBy: req.createdBy,
+					createdAt: "2026-06-18T00:00:00.000Z",
+				},
+			};
+		},
+		channelSubscribe: async (req) => {
+			calls.channelSubscribe.push(req);
+			return { subscribedAt: "2026-06-18T00:00:00.000Z" };
+		},
+		channelSend: async (req) => {
+			calls.channelSend.push(req);
+			return {
+				channelMessageId: "ch-msg-1",
+				deliveredTo: [],
+				sentAt: "2026-06-18T00:00:00.000Z",
+			};
 		},
 		...overrides,
 	};
@@ -176,6 +209,60 @@ describe("mcp/server.dispatch", () => {
 		};
 		assert.equal(calls.listPeers, 1);
 		assert.deepEqual(res.peers, []);
+	});
+
+	it("channel_create injects createdBy from session", async () => {
+		const { client, calls } = makeMockClient();
+		await dispatch(client, noopSpawn, "register", { topicId: "alice" });
+		const res = (await dispatch(client, noopSpawn, "channel_create", {
+			channelId: "general",
+		})) as { channel: { channelId: string; createdBy: string } };
+		assert.equal(calls.channelCreate.length, 1);
+		assert.deepEqual(calls.channelCreate[0], {
+			channelId: "general",
+			createdBy: "alice",
+		});
+		assert.equal(res.channel.createdBy, "alice");
+	});
+
+	it("channel_create before register throws TOPIC_NOT_REGISTERED", async () => {
+		const { client } = makeMockClient();
+		await assert.rejects(
+			() =>
+				dispatch(client, noopSpawn, "channel_create", { channelId: "general" }),
+			(e: unknown) =>
+				e instanceof McpClientError && e.code === "TOPIC_NOT_REGISTERED",
+		);
+	});
+
+	it("channel_subscribe injects topicId from session", async () => {
+		const { client, calls } = makeMockClient();
+		await dispatch(client, noopSpawn, "register", { topicId: "bob" });
+		await dispatch(client, noopSpawn, "channel_subscribe", {
+			channelId: "general",
+		});
+		assert.equal(calls.channelSubscribe.length, 1);
+		assert.deepEqual(calls.channelSubscribe[0], {
+			channelId: "general",
+			topicId: "bob",
+		});
+	});
+
+	it("channel_send injects from from session", async () => {
+		const { client, calls } = makeMockClient();
+		await dispatch(client, noopSpawn, "register", { topicId: "alice" });
+		await dispatch(client, noopSpawn, "channel_send", {
+			channelId: "general",
+			subject: "hi",
+			body: "hello",
+		});
+		assert.equal(calls.channelSend.length, 1);
+		assert.deepEqual(calls.channelSend[0], {
+			channelId: "general",
+			from: "alice",
+			subject: "hi",
+			body: "hello",
+		});
 	});
 
 	it("unknown tool throws UNKNOWN_TOOL", async () => {

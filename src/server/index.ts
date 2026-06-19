@@ -5,6 +5,9 @@ import Fastify, { type FastifyError, type FastifyInstance } from "fastify";
 import { type ErrorCode, errorCodeToHttpStatus } from "../protocol/errors.js";
 import {
 	type AckRequest,
+	type ChannelCreateRequest,
+	type ChannelSendRequest,
+	type ChannelSubscribeRequest,
 	HTTP_ENDPOINTS,
 	type ReadRequest,
 	type RegisterRequest,
@@ -40,6 +43,7 @@ const SUBJECT_SCHEMA = { type: "string", minLength: 1, maxLength: 256 };
 const BODY_SCHEMA = { type: "string", maxLength: 65536 };
 const THREAD_ID_SCHEMA = { type: "string", maxLength: 64 };
 const MESSAGE_ID_SCHEMA = { type: "string", minLength: 1, maxLength: 64 };
+const CHANNEL_ID_SCHEMA = { type: "string", minLength: 1, maxLength: 64 };
 
 const REGISTER_BODY = {
 	type: "object",
@@ -89,6 +93,35 @@ const ACK_BODY = {
 const LIST_PEERS_BODY = {
 	type: "object",
 	properties: {},
+	additionalProperties: false,
+};
+const CHANNEL_CREATE_BODY = {
+	type: "object",
+	properties: {
+		channelId: CHANNEL_ID_SCHEMA,
+		createdBy: TOPIC_ID_SCHEMA,
+	},
+	required: ["channelId", "createdBy"],
+	additionalProperties: false,
+};
+const CHANNEL_SUBSCRIBE_BODY = {
+	type: "object",
+	properties: {
+		channelId: CHANNEL_ID_SCHEMA,
+		topicId: TOPIC_ID_SCHEMA,
+	},
+	required: ["channelId", "topicId"],
+	additionalProperties: false,
+};
+const CHANNEL_SEND_BODY = {
+	type: "object",
+	properties: {
+		channelId: CHANNEL_ID_SCHEMA,
+		from: TOPIC_ID_SCHEMA,
+		subject: SUBJECT_SCHEMA,
+		body: BODY_SCHEMA,
+	},
+	required: ["channelId", "from", "subject", "body"],
 	additionalProperties: false,
 };
 
@@ -172,6 +205,24 @@ export function createServer(opts: ServerOptions): Server {
 		HTTP_ENDPOINTS.listPeers.path,
 		{ schema: { body: LIST_PEERS_BODY } },
 		async () => ({ ok: true, ...broker.listPeers() }),
+	);
+
+	app.post<{ Body: ChannelCreateRequest }>(
+		HTTP_ENDPOINTS.channelCreate.path,
+		{ schema: { body: CHANNEL_CREATE_BODY } },
+		async (req) => ({ ok: true, ...broker.channelCreate(req.body) }),
+	);
+
+	app.post<{ Body: ChannelSubscribeRequest }>(
+		HTTP_ENDPOINTS.channelSubscribe.path,
+		{ schema: { body: CHANNEL_SUBSCRIBE_BODY } },
+		async (req) => ({ ok: true, ...broker.channelSubscribe(req.body) }),
+	);
+
+	app.post<{ Body: ChannelSendRequest }>(
+		HTTP_ENDPOINTS.channelSend.path,
+		{ schema: { body: CHANNEL_SEND_BODY } },
+		async (req) => ({ ok: true, ...broker.channelSend(req.body) }),
 	);
 
 	app.get<{ Params: { topicId: string } }>(
