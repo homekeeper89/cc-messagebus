@@ -2,6 +2,12 @@ import type { ApiResponse } from "../protocol/errors.js";
 import {
 	type AckRequest,
 	type AckResponse,
+	type ChannelCreateRequest,
+	type ChannelCreateResponse,
+	type ChannelSendRequest,
+	type ChannelSendResponse,
+	type ChannelSubscribeRequest,
+	type ChannelSubscribeResponse,
 	HTTP_ENDPOINTS,
 	type ListPeersResponse,
 	type ReadRequest,
@@ -32,6 +38,11 @@ export interface BrokerClient {
 	read: (req: ReadRequest) => Promise<ReadResponse>;
 	ack: (req: AckRequest) => Promise<AckResponse>;
 	listPeers: () => Promise<ListPeersResponse>;
+	channelCreate: (req: ChannelCreateRequest) => Promise<ChannelCreateResponse>;
+	channelSubscribe: (
+		req: ChannelSubscribeRequest,
+	) => Promise<ChannelSubscribeResponse>;
+	channelSend: (req: ChannelSendRequest) => Promise<ChannelSendResponse>;
 }
 
 export function createBrokerClient(baseUrl: string): BrokerClient {
@@ -91,6 +102,21 @@ export function createBrokerClient(baseUrl: string): BrokerClient {
 			call<Record<string, never>, ListPeersResponse>(
 				HTTP_ENDPOINTS.listPeers.path,
 				{},
+			),
+		channelCreate: (req) =>
+			call<ChannelCreateRequest, ChannelCreateResponse>(
+				HTTP_ENDPOINTS.channelCreate.path,
+				req,
+			),
+		channelSubscribe: (req) =>
+			call<ChannelSubscribeRequest, ChannelSubscribeResponse>(
+				HTTP_ENDPOINTS.channelSubscribe.path,
+				req,
+			),
+		channelSend: (req) =>
+			call<ChannelSendRequest, ChannelSendResponse>(
+				HTTP_ENDPOINTS.channelSend.path,
+				req,
 			),
 	};
 }

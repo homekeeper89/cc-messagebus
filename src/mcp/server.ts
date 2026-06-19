@@ -94,6 +94,29 @@ export async function dispatch(
 		}
 		case MCP_TOOL_NAMES.listPeers:
 			return client.listPeers();
+		case MCP_TOOL_NAMES.channelCreate: {
+			const createdBy = requireTopicId();
+			return client.channelCreate({
+				channelId: args.channelId as string,
+				createdBy,
+			});
+		}
+		case MCP_TOOL_NAMES.channelSubscribe: {
+			const topicId = requireTopicId();
+			return client.channelSubscribe({
+				channelId: args.channelId as string,
+				topicId,
+			});
+		}
+		case MCP_TOOL_NAMES.channelSend: {
+			const from = requireTopicId();
+			return client.channelSend({
+				channelId: args.channelId as string,
+				from,
+				subject: args.subject as string,
+				body: args.body as string,
+			});
+		}
 		default:
 			throw new McpClientError("UNKNOWN_TOOL", `unknown tool: ${name}`);
 	}
