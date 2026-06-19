@@ -13,7 +13,11 @@ import { SessionStatus } from "../protocol/http.js";
 export type DbErrorCode =
 	| "TOPIC_ALREADY_REGISTERED"
 	| "MESSAGE_NOT_FOUND"
-	| "MESSAGE_NOT_IN_FLIGHT";
+	| "MESSAGE_NOT_IN_FLIGHT"
+	| "CHANNEL_NOT_FOUND"
+	| "CHANNEL_ALREADY_EXISTS"
+	| "ALREADY_SUBSCRIBED"
+	| "NOT_SUBSCRIBED";
 
 export class DbError extends Error {
 	constructor(public code: DbErrorCode) {
@@ -48,6 +52,34 @@ CREATE INDEX IF NOT EXISTS idx_messages_delivery
 
 CREATE INDEX IF NOT EXISTS idx_messages_expires
 	ON messages (expires_at);
+
+CREATE TABLE IF NOT EXISTS channels (
+	id TEXT PRIMARY KEY,
+	created_at TEXT NOT NULL,
+	created_by TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS channel_subscriptions (
+	channel_id TEXT NOT NULL REFERENCES channels(id) ON DELETE CASCADE,
+	subscriber_topic_id TEXT NOT NULL,
+	subscribed_at TEXT NOT NULL,
+	PRIMARY KEY (channel_id, subscriber_topic_id)
+);
+
+CREATE TABLE IF NOT EXISTS channel_messages (
+	id TEXT PRIMARY KEY,
+	channel_id TEXT NOT NULL REFERENCES channels(id) ON DELETE CASCADE,
+	from_topic_id TEXT NOT NULL,
+	subject TEXT NOT NULL,
+	body TEXT NOT NULL,
+	sent_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_channel_messages_channel_sent
+	ON channel_messages (channel_id, sent_at);
+
+CREATE INDEX IF NOT EXISTS idx_channel_subscriptions_subscriber
+	ON channel_subscriptions (subscriber_topic_id);
 `;
 
 interface SessionRow {
@@ -68,6 +100,24 @@ interface MessageRow {
 	in_flight_until: string | null;
 	acked_at: string | null;
 	expires_at: string;
+	channel_message_id: string | null;
+}
+
+interface ChannelRow {
+	id: string;
+	created_at: string;
+	created_by: string;
+}
+
+export interface ChannelSendInput {
+	channelMessageId: string;
+	channelId: string;
+	from: TopicId;
+	subject: string;
+	body: string;
+	sentAt: IsoTimestamp;
+	expiresAt: IsoTimestamp;
+	deliveryMessageIds: string[];
 }
 
 function rowToPeer(row: SessionRow, queueLength: number): PeerDto {
@@ -101,6 +151,18 @@ export function openDatabase(dbPath: string) {
 	db.pragma("journal_mode = WAL");
 	db.pragma("foreign_keys = ON");
 	db.exec(MIGRATION);
+
+	const messagesCols = db
+		.prepare<[], { name: string }>("PRAGMA table_info(messages)")
+		.all();
+	const hasChannelMessageId = messagesCols.some(
+		(c) => c.name === "channel_message_id",
+	);
+	if (!hasChannelMessageId) {
+		db.exec(
+			"ALTER TABLE messages ADD COLUMN channel_message_id TEXT REFERENCES channel_messages(id) ON DELETE SET NULL",
+		);
+	}
 
 	const stmtGetSession = db.prepare<[string], SessionRow>(
 		"SELECT * FROM sessions WHERE topic_id = ?",
@@ -176,6 +238,41 @@ export function openDatabase(dbPath: string) {
 	);
 	const stmtDeleteMessage = db.prepare<[string]>(
 		"DELETE FROM messages WHERE id = ?",
+	);
+	const stmtInsertChannel = db.prepare<[string, string, string]>(
+		"INSERT INTO channels (id, created_at, created_by) VALUES (?, ?, ?)",
+	);
+	const stmtGetChannel = db.prepare<[string], ChannelRow>(
+		"SELECT * FROM channels WHERE id = ?",
+	);
+	const stmtInsertChannelSubscription = db.prepare<[string, string, string]>(
+		"INSERT INTO channel_subscriptions (channel_id, subscriber_topic_id, subscribed_at) VALUES (?, ?, ?)",
+	);
+	const stmtListChannelSubscribers = db.prepare<
+		[string],
+		{ subscriber_topic_id: string }
+	>(
+		"SELECT subscriber_topic_id FROM channel_subscriptions WHERE channel_id = ?",
+	);
+	const stmtInsertChannelMessage = db.prepare<
+		[string, string, string, string, string, string]
+	>(
+		"INSERT INTO channel_messages (id, channel_id, from_topic_id, subject, body, sent_at) VALUES (?, ?, ?, ?, ?, ?)",
+	);
+	const stmtInsertMessageWithChannel = db.prepare<
+		[
+			string,
+			string,
+			string,
+			string,
+			string,
+			string | null,
+			string,
+			string,
+			string,
+		]
+	>(
+		"INSERT INTO messages (id, from_topic, to_topic, subject, body, thread_id, sent_at, expires_at, channel_message_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
 	);
 
 	function registerSession(topicId: TopicId, now: IsoTimestamp): PeerDto {
@@ -277,6 +374,79 @@ export function openDatabase(dbPath: string) {
 		return rows.map((r) => r.id);
 	}
 
+	function createChannel(
+		channelId: string,
+		createdBy: TopicId,
+		now: IsoTimestamp,
+	): void {
+		const existing = stmtGetChannel.get(channelId);
+		if (existing) throw new DbError("CHANNEL_ALREADY_EXISTS");
+		stmtInsertChannel.run(channelId, now, createdBy);
+	}
+
+	function subscribeChannel(
+		channelId: string,
+		subscriberTopicId: TopicId,
+		now: IsoTimestamp,
+	): void {
+		const channel = stmtGetChannel.get(channelId);
+		if (!channel) throw new DbError("CHANNEL_NOT_FOUND");
+		try {
+			stmtInsertChannelSubscription.run(channelId, subscriberTopicId, now);
+		} catch (err: unknown) {
+			if (
+				err instanceof Error &&
+				err.message.includes("UNIQUE constraint failed")
+			) {
+				throw new DbError("ALREADY_SUBSCRIBED");
+			}
+			throw err;
+		}
+	}
+
+	const channelSendTx = db.transaction(
+		(input: ChannelSendInput): { deliveredTo: TopicId[] } => {
+			const channel = stmtGetChannel.get(input.channelId);
+			if (!channel) throw new DbError("CHANNEL_NOT_FOUND");
+
+			stmtInsertChannelMessage.run(
+				input.channelMessageId,
+				input.channelId,
+				input.from,
+				input.subject,
+				input.body,
+				input.sentAt,
+			);
+
+			const subscribers = stmtListChannelSubscribers
+				.all(input.channelId)
+				.map((r) => r.subscriber_topic_id)
+				.filter((sid) => sid !== input.from);
+
+			if (subscribers.length !== input.deliveryMessageIds.length) {
+				throw new Error(
+					`deliveryMessageIds count mismatch: expected ${subscribers.length}, got ${input.deliveryMessageIds.length}`,
+				);
+			}
+
+			subscribers.forEach((subscriberId, i) => {
+				stmtInsertMessageWithChannel.run(
+					input.deliveryMessageIds[i] as string,
+					input.from,
+					subscriberId,
+					input.subject,
+					input.body,
+					null,
+					input.sentAt,
+					input.expiresAt,
+					input.channelMessageId,
+				);
+			});
+
+			return { deliveredTo: subscribers };
+		},
+	);
+
 	return {
 		registerSession,
 		unregisterSession: (topicId: TopicId, purge: boolean) =>
@@ -295,6 +465,9 @@ export function openDatabase(dbPath: string) {
 		ackMessage,
 		expireInFlight,
 		deleteExpired,
+		createChannel,
+		subscribeChannel,
+		channelSend: (input: ChannelSendInput) => channelSendTx(input),
 		close: (): void => {
 			db.close();
 		},
