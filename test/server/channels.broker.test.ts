@@ -15,6 +15,7 @@ describe("broker channels", () => {
 	let dbPath: string;
 	let db: CcDatabase;
 	let broker: Broker;
+	let clockMs: number;
 
 	before(() => {
 		tmpDir = mkdtempSync(join(tmpdir(), "ccmb-channels-broker-"));
@@ -30,10 +31,16 @@ describe("broker channels", () => {
 		db?.close();
 		rmSync(dbPath, { force: true });
 		db = openDatabase(dbPath);
+		// channel history pagination 테스트의 sent_at tie-break flake 회피 위해 monotonic clock 주입.
+		clockMs = Date.parse("2026-01-01T00:00:00.000Z");
 		broker = createBroker(db, {
 			visibilityTimeoutSec: 30,
 			ttlDays: 30,
 			dashboardUrl: "http://localhost:5959",
+			clock: () => {
+				clockMs += 1;
+				return new Date(clockMs).toISOString();
+			},
 		});
 	});
 
@@ -420,7 +427,7 @@ describe("broker channels", () => {
 	});
 
 	describe("channelHistory", () => {
-		test("returns canonical messages in DESC order with derived expiresAt", async () => {
+		test("returns canonical messages in DESC order with derived expiresAt", () => {
 			broker.register({ topicId: "alice" });
 			broker.register({ topicId: "bob" });
 			broker.channelCreate({ channelId: "ch-1", createdBy: "alice" });
@@ -431,7 +438,6 @@ describe("broker channels", () => {
 				subject: "first",
 				body: "m1",
 			});
-			await new Promise((r) => setTimeout(r, 5));
 			broker.channelSend({
 				channelId: "ch-1",
 				from: "alice",
@@ -450,7 +456,7 @@ describe("broker channels", () => {
 			);
 		});
 
-		test("paginates with hasMore via limit + 1 detection", async () => {
+		test("paginates with hasMore via limit + 1 detection", () => {
 			broker.register({ topicId: "alice" });
 			broker.channelCreate({ channelId: "ch-1", createdBy: "alice" });
 			for (let i = 0; i < 5; i++) {
@@ -460,7 +466,6 @@ describe("broker channels", () => {
 					subject: `s${i}`,
 					body: `m${i}`,
 				});
-				await new Promise((r) => setTimeout(r, 5));
 			}
 
 			const page1 = broker.channelHistory({ channelId: "ch-1", limit: 2 });

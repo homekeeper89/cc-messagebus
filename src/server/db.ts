@@ -442,18 +442,18 @@ export function openDatabase(dbPath: string) {
 		}
 	}
 
-	function unsubscribeChannel(
-		channelId: string,
-		subscriberTopicId: TopicId,
-	): void {
-		const channel = stmtGetChannel.get(channelId);
-		if (!channel) throw new DbError("CHANNEL_NOT_FOUND");
-		const result = stmtDeleteChannelSubscription.run(
-			channelId,
-			subscriberTopicId,
-		);
-		if (result.changes === 0) throw new DbError("NOT_SUBSCRIBED");
-	}
+	// channel 존재 check + DELETE 를 atomic 하게 수행해야 향후 channel delete RPC 추가 시 race-free.
+	const unsubscribeChannelTx = db.transaction(
+		(channelId: string, subscriberTopicId: TopicId): void => {
+			const channel = stmtGetChannel.get(channelId);
+			if (!channel) throw new DbError("CHANNEL_NOT_FOUND");
+			const result = stmtDeleteChannelSubscription.run(
+				channelId,
+				subscriberTopicId,
+			);
+			if (result.changes === 0) throw new DbError("NOT_SUBSCRIBED");
+		},
+	);
 
 	function fetchChannelHistory(
 		channelId: string,
@@ -530,7 +530,8 @@ export function openDatabase(dbPath: string) {
 		deleteExpired,
 		createChannel,
 		subscribeChannel,
-		unsubscribeChannel,
+		unsubscribeChannel: (channelId: string, subscriberTopicId: TopicId) =>
+			unsubscribeChannelTx(channelId, subscriberTopicId),
 		fetchChannelHistory,
 		listChannelSubscribers,
 		channelSend: (input: ChannelSendInput) => channelSendTx(input),
