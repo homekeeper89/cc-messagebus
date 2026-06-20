@@ -120,6 +120,15 @@ export interface ChannelSendInput {
 	deliveryMessageIds: string[];
 }
 
+export interface ChannelMessageRow {
+	id: string;
+	channel_id: string;
+	from_topic_id: string;
+	subject: string;
+	body: string;
+	sent_at: string;
+}
+
 function rowToPeer(row: SessionRow, queueLength: number): PeerDto {
 	return {
 		topicId: row.topic_id,
@@ -247,6 +256,29 @@ export function openDatabase(dbPath: string) {
 	);
 	const stmtInsertChannelSubscription = db.prepare<[string, string, string]>(
 		"INSERT INTO channel_subscriptions (channel_id, subscriber_topic_id, subscribed_at) VALUES (?, ?, ?)",
+	);
+	const stmtDeleteChannelSubscription = db.prepare<[string, string]>(
+		"DELETE FROM channel_subscriptions WHERE channel_id = ? AND subscriber_topic_id = ?",
+	);
+	const stmtListChannelHistoryAll = db.prepare<
+		[string, number],
+		ChannelMessageRow
+	>(
+		`SELECT id, channel_id, from_topic_id, subject, body, sent_at
+		 FROM channel_messages
+		 WHERE channel_id = ?
+		 ORDER BY sent_at DESC, id DESC
+		 LIMIT ?`,
+	);
+	const stmtListChannelHistoryBefore = db.prepare<
+		[string, string, number],
+		ChannelMessageRow
+	>(
+		`SELECT id, channel_id, from_topic_id, subject, body, sent_at
+		 FROM channel_messages
+		 WHERE channel_id = ? AND sent_at < ?
+		 ORDER BY sent_at DESC, id DESC
+		 LIMIT ?`,
 	);
 	const stmtListChannelSubscribers = db.prepare<
 		[string],
@@ -410,6 +442,31 @@ export function openDatabase(dbPath: string) {
 		}
 	}
 
+	function unsubscribeChannel(
+		channelId: string,
+		subscriberTopicId: TopicId,
+	): void {
+		const channel = stmtGetChannel.get(channelId);
+		if (!channel) throw new DbError("CHANNEL_NOT_FOUND");
+		const result = stmtDeleteChannelSubscription.run(
+			channelId,
+			subscriberTopicId,
+		);
+		if (result.changes === 0) throw new DbError("NOT_SUBSCRIBED");
+	}
+
+	function fetchChannelHistory(
+		channelId: string,
+		limit: number,
+		beforeSentAt: IsoTimestamp | null,
+	): ChannelMessageRow[] {
+		const channel = stmtGetChannel.get(channelId);
+		if (!channel) throw new DbError("CHANNEL_NOT_FOUND");
+		return beforeSentAt === null
+			? stmtListChannelHistoryAll.all(channelId, limit + 1)
+			: stmtListChannelHistoryBefore.all(channelId, beforeSentAt, limit + 1);
+	}
+
 	const channelSendTx = db.transaction(
 		(input: ChannelSendInput): { deliveredTo: TopicId[] } => {
 			const channel = stmtGetChannel.get(input.channelId);
@@ -473,6 +530,8 @@ export function openDatabase(dbPath: string) {
 		deleteExpired,
 		createChannel,
 		subscribeChannel,
+		unsubscribeChannel,
+		fetchChannelHistory,
 		listChannelSubscribers,
 		channelSend: (input: ChannelSendInput) => channelSendTx(input),
 		close: (): void => {

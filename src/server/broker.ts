@@ -7,11 +7,16 @@ import type {
 	ChannelCreateRequest,
 	ChannelCreateResponse,
 	ChannelDto,
+	ChannelHistoryRequest,
+	ChannelHistoryResponse,
+	ChannelMessageDto,
 	ChannelMessageId,
 	ChannelSendRequest,
 	ChannelSendResponse,
 	ChannelSubscribeRequest,
 	ChannelSubscribeResponse,
+	ChannelUnsubscribeRequest,
+	ChannelUnsubscribeResponse,
 	ListPeersResponse,
 	MessageDto,
 	MessageId,
@@ -57,7 +62,14 @@ export interface Broker {
 	channelCreate: (req: ChannelCreateRequest) => ChannelCreateResponse;
 	channelSubscribe: (req: ChannelSubscribeRequest) => ChannelSubscribeResponse;
 	channelSend: (req: ChannelSendRequest) => ChannelSendResponse;
+	channelUnsubscribe: (
+		req: ChannelUnsubscribeRequest,
+	) => ChannelUnsubscribeResponse;
+	channelHistory: (req: ChannelHistoryRequest) => ChannelHistoryResponse;
 }
+
+const HISTORY_LIMIT_DEFAULT = 50;
+const HISTORY_LIMIT_MAX = 200;
 
 const READ_MAX_DEFAULT = 50;
 const MS_PER_DAY = 24 * 60 * 60 * 1000;
@@ -373,6 +385,82 @@ export function createBroker(db: CcDatabase, opts: BrokerOptions): Broker {
 		};
 	}
 
+	function channelUnsubscribe(
+		req: ChannelUnsubscribeRequest,
+	): ChannelUnsubscribeResponse {
+		const subscriber = db.getSession(req.topicId);
+		if (!subscriber) {
+			throw new BrokerError(
+				"TOPIC_NOT_FOUND",
+				`subscriber topic '${req.topicId}' is not registered`,
+			);
+		}
+		const now = nowIso();
+		try {
+			db.unsubscribeChannel(req.channelId, req.topicId);
+		} catch (e) {
+			if (e instanceof DbError && e.code === "CHANNEL_NOT_FOUND") {
+				throw new BrokerError(
+					"CHANNEL_NOT_FOUND",
+					`channel '${req.channelId}' not found`,
+				);
+			}
+			if (e instanceof DbError && e.code === "NOT_SUBSCRIBED") {
+				throw new BrokerError(
+					"NOT_SUBSCRIBED",
+					`topic '${req.topicId}' is not subscribed to '${req.channelId}'`,
+				);
+			}
+			throw e;
+		}
+		db.touchLastSeen(req.topicId, now);
+		emit({
+			type: "channel_unsubscribed",
+			channelId: req.channelId,
+			topicId: req.topicId,
+			at: now,
+		});
+		return { unsubscribedAt: now };
+	}
+
+	function channelHistory(req: ChannelHistoryRequest): ChannelHistoryResponse {
+		const requestedLimit = req.limit ?? HISTORY_LIMIT_DEFAULT;
+		if (requestedLimit < 1 || requestedLimit > HISTORY_LIMIT_MAX) {
+			throw new BrokerError(
+				"VALIDATION_FAILED",
+				`limit must be between 1 and ${HISTORY_LIMIT_MAX}`,
+			);
+		}
+		let rows: ReturnType<typeof db.fetchChannelHistory>;
+		try {
+			rows = db.fetchChannelHistory(
+				req.channelId,
+				requestedLimit,
+				req.beforeSentAt ?? null,
+			);
+		} catch (e) {
+			if (e instanceof DbError && e.code === "CHANNEL_NOT_FOUND") {
+				throw new BrokerError(
+					"CHANNEL_NOT_FOUND",
+					`channel '${req.channelId}' not found`,
+				);
+			}
+			throw e;
+		}
+		const hasMore = rows.length > requestedLimit;
+		const trimmed = hasMore ? rows.slice(0, requestedLimit) : rows;
+		const messages: ChannelMessageDto[] = trimmed.map((row) => ({
+			channelMessageId: row.id as ChannelMessageId,
+			channelId: row.channel_id,
+			from: row.from_topic_id,
+			subject: row.subject,
+			body: row.body,
+			sentAt: row.sent_at,
+			expiresAt: plusDays(row.sent_at, opts.ttlDays),
+		}));
+		return { messages, hasMore };
+	}
+
 	return {
 		events,
 		register,
@@ -385,5 +473,7 @@ export function createBroker(db: CcDatabase, opts: BrokerOptions): Broker {
 		channelCreate,
 		channelSubscribe,
 		channelSend,
+		channelUnsubscribe,
+		channelHistory,
 	};
 }

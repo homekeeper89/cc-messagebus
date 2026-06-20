@@ -4,10 +4,14 @@ import {
 	type AckResponse,
 	type ChannelCreateRequest,
 	type ChannelCreateResponse,
+	type ChannelHistoryRequest,
+	type ChannelHistoryResponse,
 	type ChannelSendRequest,
 	type ChannelSendResponse,
 	type ChannelSubscribeRequest,
 	type ChannelSubscribeResponse,
+	type ChannelUnsubscribeRequest,
+	type ChannelUnsubscribeResponse,
 	HTTP_ENDPOINTS,
 	type ListPeersResponse,
 	type ReadRequest,
@@ -43,6 +47,12 @@ export interface BrokerClient {
 		req: ChannelSubscribeRequest,
 	) => Promise<ChannelSubscribeResponse>;
 	channelSend: (req: ChannelSendRequest) => Promise<ChannelSendResponse>;
+	channelUnsubscribe: (
+		req: ChannelUnsubscribeRequest,
+	) => Promise<ChannelUnsubscribeResponse>;
+	channelHistory: (
+		req: ChannelHistoryRequest,
+	) => Promise<ChannelHistoryResponse>;
 }
 
 export function createBrokerClient(baseUrl: string): BrokerClient {
@@ -116,6 +126,16 @@ export function createBrokerClient(baseUrl: string): BrokerClient {
 		channelSend: (req) =>
 			call<ChannelSendRequest, ChannelSendResponse>(
 				HTTP_ENDPOINTS.channelSend.path,
+				req,
+			),
+		channelUnsubscribe: (req) =>
+			call<ChannelUnsubscribeRequest, ChannelUnsubscribeResponse>(
+				HTTP_ENDPOINTS.channelUnsubscribe.path,
+				req,
+			),
+		channelHistory: (req) =>
+			call<ChannelHistoryRequest, ChannelHistoryResponse>(
+				HTTP_ENDPOINTS.channelHistory.path,
 				req,
 			),
 	};
