@@ -212,4 +212,137 @@ describe("broker", () => {
 		});
 		assert.doesNotThrow(() => broker.register({ topicId: "alice" }));
 	});
+
+	describe("last_activity_at tracking", () => {
+		const FIXED_NOW = "2026-06-20T00:00:00.000Z";
+		let activityBroker: Broker;
+
+		beforeEach(() => {
+			activityBroker = createBroker(db, {
+				visibilityTimeoutSec: 30,
+				ttlDays: 30,
+				dashboardUrl: "http://localhost:5959",
+				clock: () => FIXED_NOW,
+			});
+		});
+
+		test("send_should_update_last_activity_at_for_sender", () => {
+			activityBroker.register({ topicId: "alice" });
+			activityBroker.register({ topicId: "bob" });
+			activityBroker.send({
+				from: "alice",
+				to: "bob",
+				subject: "s",
+				body: "b",
+			});
+			assert.equal(db.inspectLastActivityAt("alice"), FIXED_NOW);
+		});
+
+		test("read_should_update_last_activity_at_for_reader_even_when_empty", () => {
+			activityBroker.register({ topicId: "bob" });
+			const result = activityBroker.read({ topicId: "bob" });
+			assert.equal(result.messages.length, 0);
+			assert.equal(
+				db.inspectLastActivityAt("bob"),
+				FIXED_NOW,
+				"polling read counts as activity",
+			);
+		});
+
+		test("ack_should_update_last_activity_at_for_acker", () => {
+			activityBroker.register({ topicId: "alice" });
+			activityBroker.register({ topicId: "bob" });
+			const sent = activityBroker.send({
+				from: "alice",
+				to: "bob",
+				subject: "s",
+				body: "b",
+			});
+			activityBroker.read({ topicId: "bob" });
+			activityBroker.ack({ topicId: "bob", messageId: sent.messageId });
+			assert.equal(db.inspectLastActivityAt("bob"), FIXED_NOW);
+		});
+
+		test("channelSubscribe_should_update_last_activity_at_for_subscriber", () => {
+			activityBroker.register({ topicId: "alice" });
+			activityBroker.channelCreate({
+				channelId: "epic-1",
+				createdBy: "alice",
+			});
+			activityBroker.register({ topicId: "bob" });
+			activityBroker.channelSubscribe({
+				channelId: "epic-1",
+				topicId: "bob",
+			});
+			assert.equal(db.inspectLastActivityAt("bob"), FIXED_NOW);
+		});
+
+		test("channelSend_should_update_last_activity_at_for_sender_only", () => {
+			activityBroker.register({ topicId: "alice" });
+			activityBroker.channelCreate({
+				channelId: "epic-1",
+				createdBy: "alice",
+			});
+			activityBroker.register({ topicId: "bob" });
+			activityBroker.channelSubscribe({
+				channelId: "epic-1",
+				topicId: "bob",
+			});
+
+			const bobBefore = db.inspectLastActivityAt("bob");
+			activityBroker.channelSend({
+				channelId: "epic-1",
+				from: "alice",
+				subject: "s",
+				body: "b",
+			});
+			assert.equal(db.inspectLastActivityAt("alice"), FIXED_NOW);
+			assert.equal(
+				db.inspectLastActivityAt("bob"),
+				bobBefore,
+				"subscriber receiving fan-out is not 'activity'",
+			);
+		});
+
+		test("register_should_not_update_last_activity_at", () => {
+			activityBroker.register({ topicId: "alice" });
+			assert.equal(
+				db.inspectLastActivityAt("alice"),
+				null,
+				"registration is bookkeeping, not activity",
+			);
+		});
+
+		test("channelCreate_should_not_update_last_activity_at", () => {
+			activityBroker.register({ topicId: "alice" });
+			activityBroker.channelCreate({
+				channelId: "epic-1",
+				createdBy: "alice",
+			});
+			assert.equal(db.inspectLastActivityAt("alice"), null);
+		});
+
+		test("channelUnsubscribe_should_not_update_last_activity_at", () => {
+			activityBroker.register({ topicId: "alice" });
+			activityBroker.channelCreate({
+				channelId: "epic-1",
+				createdBy: "alice",
+			});
+			activityBroker.register({ topicId: "bob" });
+			activityBroker.channelSubscribe({
+				channelId: "epic-1",
+				topicId: "bob",
+			});
+			const bobAfterSubscribe = db.inspectLastActivityAt("bob");
+			activityBroker.channelUnsubscribe({
+				channelId: "epic-1",
+				topicId: "bob",
+			});
+			assert.equal(
+				db.inspectLastActivityAt("bob"),
+				bobAfterSubscribe,
+				"unsubscribe must not bump activity",
+			);
+		});
+	});
 });
