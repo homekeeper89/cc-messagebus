@@ -301,4 +301,17 @@ describe("channels", () => {
 		db2.close();
 		db = openDatabase(dbPath);
 	});
+
+	test("inspectLastActivityAt should return null for pre-migration sessions on reopen", () => {
+		db.registerSession("saturn", "2026-06-19T00:00:00.000Z");
+		assert.equal(db.inspectLastActivityAt("saturn"), null);
+		db.close();
+
+		db = openDatabase(dbPath);
+		assert.equal(
+			db.inspectLastActivityAt("saturn"),
+			null,
+			"existing session must have null last_activity_at after backward-compatible ALTER",
+		);
+	});
 });
