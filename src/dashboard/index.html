@@ -182,6 +182,14 @@
 			#flow li[data-kind="session_disconnected"] .kind {
 				color: var(--muted);
 			}
+			#flow li[data-kind="channel_created"] .kind,
+			#flow li[data-kind="channel_subscribed"] .kind,
+			#flow li[data-kind="channel_unsubscribed"] .kind {
+				color: var(--muted);
+			}
+			#flow li[data-kind="channel_message_published"] .kind {
+				color: var(--accent);
+			}
 			#flow li pre {
 				display: none;
 				margin: 6px 0 0;
@@ -288,6 +296,13 @@
 						return event.peer.topicId;
 					case "session_disconnected":
 						return event.topicId;
+					case "channel_created":
+						return event.channel.channelId;
+					case "channel_subscribed":
+					case "channel_unsubscribed":
+						return `${event.topicId}  ${event.channelId}`;
+					case "channel_message_published":
+						return `${event.from} → [${event.deliveredTo.join(", ")}]  ${event.channelId}`;
 					default:
 						return "";
 				}
@@ -300,7 +315,11 @@
 				const li = document.createElement("li");
 				li.dataset.kind = event.type;
 				const at =
-					event.at ?? event.message?.sentAt ?? new Date().toISOString();
+					event.at ??
+					event.message?.sentAt ??
+					event.sentAt ??
+					event.channel?.createdAt ??
+					new Date().toISOString();
 				const time = document.createElement("span");
 				time.className = "time";
 				time.textContent = timeLabel(at);
@@ -308,7 +327,8 @@
 				kind.className = "kind";
 				kind.textContent = event.type
 					.replace(/^message_/, "")
-					.replace(/^session_/, "");
+					.replace(/^session_/, "")
+					.replace(/^channel_/, "");
 				const desc = document.createTextNode(describe(event));
 				li.append(time, kind, desc);
 				const detail = document.createElement("pre");
@@ -387,6 +407,18 @@
 					pushFlow(JSON.parse(e.data));
 				});
 				es.addEventListener("message_expired", (e) => {
+					pushFlow(JSON.parse(e.data));
+				});
+				es.addEventListener("channel_created", (e) => {
+					pushFlow(JSON.parse(e.data));
+				});
+				es.addEventListener("channel_subscribed", (e) => {
+					pushFlow(JSON.parse(e.data));
+				});
+				es.addEventListener("channel_unsubscribed", (e) => {
+					pushFlow(JSON.parse(e.data));
+				});
+				es.addEventListener("channel_message_published", (e) => {
 					pushFlow(JSON.parse(e.data));
 				});
 				es.addEventListener("heartbeat", () => {});
