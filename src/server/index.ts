@@ -6,8 +6,10 @@ import { type ErrorCode, errorCodeToHttpStatus } from "../protocol/errors.js";
 import {
 	type AckRequest,
 	type ChannelCreateRequest,
+	type ChannelHistoryRequest,
 	type ChannelSendRequest,
 	type ChannelSubscribeRequest,
+	type ChannelUnsubscribeRequest,
 	HTTP_ENDPOINTS,
 	type ReadRequest,
 	type RegisterRequest,
@@ -21,7 +23,12 @@ import {
 	SSE_HEARTBEAT_INTERVAL_SEC,
 	serializeSseEvent,
 } from "../protocol/sse.js";
-import { type Broker, BrokerError, createBroker } from "./broker.js";
+import {
+	type Broker,
+	BrokerError,
+	createBroker,
+	HISTORY_LIMIT_MAX,
+} from "./broker.js";
 import { type CleanupHandle, startCleanup } from "./cleanup.js";
 import { type CcDatabase, openDatabase } from "./db.js";
 
@@ -124,6 +131,26 @@ const CHANNEL_SEND_BODY = {
 	required: ["channelId", "from", "subject", "body"],
 	additionalProperties: false,
 };
+const CHANNEL_UNSUBSCRIBE_BODY = {
+	type: "object",
+	properties: {
+		channelId: CHANNEL_ID_SCHEMA,
+		topicId: TOPIC_ID_SCHEMA,
+	},
+	required: ["channelId", "topicId"],
+	additionalProperties: false,
+};
+const ISO_TIMESTAMP_SCHEMA = { type: "string", minLength: 1, maxLength: 64 };
+const CHANNEL_HISTORY_BODY = {
+	type: "object",
+	properties: {
+		channelId: CHANNEL_ID_SCHEMA,
+		limit: { type: "integer", minimum: 1, maximum: HISTORY_LIMIT_MAX },
+		beforeSentAt: ISO_TIMESTAMP_SCHEMA,
+	},
+	required: ["channelId"],
+	additionalProperties: false,
+};
 
 export interface ServerOptions {
 	host?: string;
@@ -223,6 +250,18 @@ export function createServer(opts: ServerOptions): Server {
 		HTTP_ENDPOINTS.channelSend.path,
 		{ schema: { body: CHANNEL_SEND_BODY } },
 		async (req) => ({ ok: true, ...broker.channelSend(req.body) }),
+	);
+
+	app.post<{ Body: ChannelUnsubscribeRequest }>(
+		HTTP_ENDPOINTS.channelUnsubscribe.path,
+		{ schema: { body: CHANNEL_UNSUBSCRIBE_BODY } },
+		async (req) => ({ ok: true, ...broker.channelUnsubscribe(req.body) }),
+	);
+
+	app.post<{ Body: ChannelHistoryRequest }>(
+		HTTP_ENDPOINTS.channelHistory.path,
+		{ schema: { body: CHANNEL_HISTORY_BODY } },
+		async (req) => ({ ok: true, ...broker.channelHistory(req.body) }),
 	);
 
 	app.get<{ Params: { topicId: string } }>(

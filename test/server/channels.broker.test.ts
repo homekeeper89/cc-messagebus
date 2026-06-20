@@ -15,6 +15,7 @@ describe("broker channels", () => {
 	let dbPath: string;
 	let db: CcDatabase;
 	let broker: Broker;
+	let clockMs: number;
 
 	before(() => {
 		tmpDir = mkdtempSync(join(tmpdir(), "ccmb-channels-broker-"));
@@ -30,10 +31,16 @@ describe("broker channels", () => {
 		db?.close();
 		rmSync(dbPath, { force: true });
 		db = openDatabase(dbPath);
+		// channel history pagination 테스트의 sent_at tie-break flake 회피 위해 monotonic clock 주입.
+		clockMs = Date.parse("2026-01-01T00:00:00.000Z");
 		broker = createBroker(db, {
 			visibilityTimeoutSec: 30,
 			ttlDays: 30,
 			dashboardUrl: "http://localhost:5959",
+			clock: () => {
+				clockMs += 1;
+				return new Date(clockMs).toISOString();
+			},
 		});
 	});
 
@@ -319,6 +326,201 @@ describe("broker channels", () => {
 			assert.ok(
 				!received.includes("alice"),
 				"sender must not receive own message_sent",
+			);
+		});
+	});
+
+	describe("channelUnsubscribe", () => {
+		test("unsubscribes and emits channel_unsubscribed", () => {
+			broker.register({ topicId: "alice" });
+			broker.register({ topicId: "bob" });
+			broker.channelCreate({ channelId: "ch-1", createdBy: "alice" });
+			broker.channelSubscribe({ channelId: "ch-1", topicId: "bob" });
+			let receivedEvent: unknown = null;
+			broker.events.on("channel_unsubscribed", (e) => {
+				receivedEvent = e;
+			});
+			const result = broker.channelUnsubscribe({
+				channelId: "ch-1",
+				topicId: "bob",
+			});
+			assert.ok(result.unsubscribedAt);
+			assert.ok(receivedEvent);
+		});
+
+		test("throws CHANNEL_NOT_FOUND on missing channel", () => {
+			broker.register({ topicId: "alice" });
+			assert.throws(
+				() =>
+					broker.channelUnsubscribe({
+						channelId: "ghost-ch",
+						topicId: "alice",
+					}),
+				(err: unknown) =>
+					err instanceof BrokerError && err.code === "CHANNEL_NOT_FOUND",
+			);
+		});
+
+		test("throws NOT_SUBSCRIBED when subscription does not exist", () => {
+			broker.register({ topicId: "alice" });
+			broker.register({ topicId: "bob" });
+			broker.channelCreate({ channelId: "ch-1", createdBy: "alice" });
+			assert.throws(
+				() => broker.channelUnsubscribe({ channelId: "ch-1", topicId: "bob" }),
+				(err: unknown) =>
+					err instanceof BrokerError && err.code === "NOT_SUBSCRIBED",
+			);
+		});
+
+		test("throws TOPIC_NOT_FOUND when topicId is not registered", () => {
+			broker.register({ topicId: "alice" });
+			broker.channelCreate({ channelId: "ch-1", createdBy: "alice" });
+			assert.throws(
+				() =>
+					broker.channelUnsubscribe({ channelId: "ch-1", topicId: "ghost" }),
+				(err: unknown) =>
+					err instanceof BrokerError && err.code === "TOPIC_NOT_FOUND",
+			);
+		});
+
+		test("already-delivered messages remain ackable after unsubscribe", () => {
+			broker.register({ topicId: "alice" });
+			broker.register({ topicId: "bob" });
+			broker.channelCreate({ channelId: "ch-1", createdBy: "alice" });
+			broker.channelSubscribe({ channelId: "ch-1", topicId: "bob" });
+			broker.channelSend({
+				channelId: "ch-1",
+				from: "alice",
+				subject: "hi",
+				body: "before unsubscribe",
+			});
+
+			broker.channelUnsubscribe({ channelId: "ch-1", topicId: "bob" });
+
+			const bobRead = broker.read({ topicId: "bob" });
+			assert.equal(
+				bobRead.messages.length,
+				1,
+				"prior message must still be in bob's inbox after unsubscribe",
+			);
+			const msgId = bobRead.messages[0]?.id;
+			assert.ok(msgId);
+			const ackResult = broker.ack({ topicId: "bob", messageId: msgId });
+			assert.ok(ackResult.ackedAt);
+		});
+
+		test("post-unsubscribe send does not deliver to former subscriber", () => {
+			broker.register({ topicId: "alice" });
+			broker.register({ topicId: "bob" });
+			broker.channelCreate({ channelId: "ch-1", createdBy: "alice" });
+			broker.channelSubscribe({ channelId: "ch-1", topicId: "bob" });
+			broker.channelUnsubscribe({ channelId: "ch-1", topicId: "bob" });
+
+			const result = broker.channelSend({
+				channelId: "ch-1",
+				from: "alice",
+				subject: "hi",
+				body: "after unsubscribe",
+			});
+			assert.deepEqual(result.deliveredTo, []);
+		});
+	});
+
+	describe("channelHistory", () => {
+		test("returns canonical messages in DESC order with derived expiresAt", () => {
+			broker.register({ topicId: "alice" });
+			broker.register({ topicId: "bob" });
+			broker.channelCreate({ channelId: "ch-1", createdBy: "alice" });
+			broker.channelSubscribe({ channelId: "ch-1", topicId: "bob" });
+			broker.channelSend({
+				channelId: "ch-1",
+				from: "alice",
+				subject: "first",
+				body: "m1",
+			});
+			broker.channelSend({
+				channelId: "ch-1",
+				from: "alice",
+				subject: "second",
+				body: "m2",
+			});
+
+			const result = broker.channelHistory({ channelId: "ch-1" });
+			assert.equal(result.messages.length, 2);
+			assert.equal(result.hasMore, false);
+			assert.equal(result.messages[0]?.subject, "second", "DESC: newest first");
+			assert.equal(result.messages[1]?.subject, "first");
+			assert.ok(
+				result.messages[0]?.expiresAt,
+				"expiresAt must be derived from sentAt + ttlDays",
+			);
+		});
+
+		test("paginates with hasMore via limit + 1 detection", () => {
+			broker.register({ topicId: "alice" });
+			broker.channelCreate({ channelId: "ch-1", createdBy: "alice" });
+			for (let i = 0; i < 5; i++) {
+				broker.channelSend({
+					channelId: "ch-1",
+					from: "alice",
+					subject: `s${i}`,
+					body: `m${i}`,
+				});
+			}
+
+			const page1 = broker.channelHistory({ channelId: "ch-1", limit: 2 });
+			assert.equal(page1.messages.length, 2);
+			assert.equal(page1.hasMore, true);
+
+			const cursor = page1.messages[1]?.sentAt;
+			assert.ok(cursor);
+			const page2 = broker.channelHistory({
+				channelId: "ch-1",
+				limit: 2,
+				beforeSentAt: cursor,
+			});
+			assert.equal(page2.messages.length, 2);
+			assert.equal(page2.hasMore, true);
+
+			const cursor2 = page2.messages[1]?.sentAt;
+			assert.ok(cursor2);
+			const page3 = broker.channelHistory({
+				channelId: "ch-1",
+				limit: 2,
+				beforeSentAt: cursor2,
+			});
+			assert.equal(page3.messages.length, 1);
+			assert.equal(page3.hasMore, false);
+		});
+
+		test("throws CHANNEL_NOT_FOUND on missing channel", () => {
+			assert.throws(
+				() => broker.channelHistory({ channelId: "ghost-ch" }),
+				(err: unknown) =>
+					err instanceof BrokerError && err.code === "CHANNEL_NOT_FOUND",
+			);
+		});
+
+		test("empty channel returns empty messages and hasMore=false", () => {
+			broker.register({ topicId: "alice" });
+			broker.channelCreate({ channelId: "ch-empty", createdBy: "alice" });
+			const result = broker.channelHistory({ channelId: "ch-empty" });
+			assert.deepEqual(result.messages, []);
+			assert.equal(result.hasMore, false);
+		});
+
+		test("rejects out-of-range limit", () => {
+			broker.register({ topicId: "alice" });
+			broker.channelCreate({ channelId: "ch-1", createdBy: "alice" });
+			assert.throws(
+				() => broker.channelHistory({ channelId: "ch-1", limit: 0 }),
+				(err: unknown) =>
+					err instanceof BrokerError && err.code === "VALIDATION_FAILED",
+			);
+			assert.throws(
+				() => broker.channelHistory({ channelId: "ch-1", limit: 999 }),
+				(err: unknown) =>
+					err instanceof BrokerError && err.code === "VALIDATION_FAILED",
 			);
 		});
 	});
