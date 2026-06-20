@@ -117,6 +117,20 @@ export async function dispatch(
 				body: args.body as string,
 			});
 		}
+		case MCP_TOOL_NAMES.channelUnsubscribe: {
+			const topicId = requireTopicId();
+			return client.channelUnsubscribe({
+				channelId: args.channelId as string,
+				topicId,
+			});
+		}
+		case MCP_TOOL_NAMES.channelHistory: {
+			return client.channelHistory({
+				channelId: args.channelId as string,
+				limit: args.limit as number | undefined,
+				beforeSentAt: args.beforeSentAt as string | undefined,
+			});
+		}
 		default:
 			throw new McpClientError("UNKNOWN_TOOL", `unknown tool: ${name}`);
 	}

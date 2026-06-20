@@ -29,6 +29,12 @@ interface CallLog {
 		subject: string;
 		body: string;
 	}[];
+	channelUnsubscribe: { channelId: string; topicId: string }[];
+	channelHistory: {
+		channelId: string;
+		limit?: number;
+		beforeSentAt?: string;
+	}[];
 }
 
 function makeMockClient(overrides: Partial<BrokerClient> = {}): {
@@ -45,6 +51,8 @@ function makeMockClient(overrides: Partial<BrokerClient> = {}): {
 		channelCreate: [],
 		channelSubscribe: [],
 		channelSend: [],
+		channelUnsubscribe: [],
+		channelHistory: [],
 	};
 	const client: BrokerClient = {
 		register: async (req) => {
@@ -96,6 +104,14 @@ function makeMockClient(overrides: Partial<BrokerClient> = {}): {
 				deliveredTo: [],
 				sentAt: "2026-06-18T00:00:00.000Z",
 			};
+		},
+		channelUnsubscribe: async (req) => {
+			calls.channelUnsubscribe.push(req);
+			return { unsubscribedAt: "2026-06-18T00:00:00.000Z" };
+		},
+		channelHistory: async (req) => {
+			calls.channelHistory.push(req);
+			return { messages: [], hasMore: false };
 		},
 		...overrides,
 	};
@@ -262,6 +278,46 @@ describe("mcp/server.dispatch", () => {
 			from: "alice",
 			subject: "hi",
 			body: "hello",
+		});
+	});
+
+	it("channel_unsubscribe injects topicId from session", async () => {
+		const { client, calls } = makeMockClient();
+		await dispatch(client, noopSpawn, "register", { topicId: "bob" });
+		await dispatch(client, noopSpawn, "channel_unsubscribe", {
+			channelId: "general",
+		});
+		assert.equal(calls.channelUnsubscribe.length, 1);
+		assert.deepEqual(calls.channelUnsubscribe[0], {
+			channelId: "general",
+			topicId: "bob",
+		});
+	});
+
+	it("channel_unsubscribe before register throws TOPIC_NOT_REGISTERED", async () => {
+		const { client } = makeMockClient();
+		await assert.rejects(
+			() =>
+				dispatch(client, noopSpawn, "channel_unsubscribe", {
+					channelId: "general",
+				}),
+			(e: unknown) =>
+				e instanceof McpClientError && e.code === "TOPIC_NOT_REGISTERED",
+		);
+	});
+
+	it("channel_history does not require register and forwards args", async () => {
+		const { client, calls } = makeMockClient();
+		await dispatch(client, noopSpawn, "channel_history", {
+			channelId: "general",
+			limit: 10,
+			beforeSentAt: "2026-06-19T00:00:00.000Z",
+		});
+		assert.equal(calls.channelHistory.length, 1);
+		assert.deepEqual(calls.channelHistory[0], {
+			channelId: "general",
+			limit: 10,
+			beforeSentAt: "2026-06-19T00:00:00.000Z",
 		});
 	});
 
