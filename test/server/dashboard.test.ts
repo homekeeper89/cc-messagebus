@@ -49,6 +49,12 @@ describe("dashboard html", () => {
 	test("dashboard html wires EventSource('/events')", async () => {
 		const res = await server.app.inject({ method: "GET", url: "/dashboard" });
 		assert.ok(res.body.includes('new EventSource("/events")'));
+		assert.ok(res.body.includes('addEventListener("channel_created"'));
+		assert.ok(res.body.includes('addEventListener("channel_subscribed"'));
+		assert.ok(res.body.includes('addEventListener("channel_unsubscribed"'));
+		assert.ok(
+			res.body.includes('addEventListener("channel_message_published"'),
+		);
 	});
 });
 
@@ -242,6 +248,117 @@ describe("events SSE", () => {
 				(e) => e.type === "message_acked",
 			);
 			assert.equal((acked as { messageId: string }).messageId, messageId);
+		} finally {
+			controller.abort();
+		}
+	});
+
+	test("GET /events streams channel lifecycle (create → subscribe → send → unsubscribe)", async () => {
+		await fetch(`${baseUrl}/api/register`, {
+			method: "POST",
+			headers: { "content-type": "application/json" },
+			body: JSON.stringify({ topicId: "alice" }),
+		});
+		await fetch(`${baseUrl}/api/register`, {
+			method: "POST",
+			headers: { "content-type": "application/json" },
+			body: JSON.stringify({ topicId: "bob" }),
+		});
+
+		const controller = new AbortController();
+		try {
+			const res = await fetch(`${baseUrl}/events`, {
+				signal: controller.signal,
+				headers: { Accept: "text/event-stream" },
+			});
+			assert.ok(res.body);
+			const reader = res.body.getReader();
+			const decoder = new TextDecoder();
+			const buf = { value: "" };
+
+			await readEvent(reader, decoder, buf, (e) => e.type === "heartbeat");
+
+			await fetch(`${baseUrl}/api/channel_create`, {
+				method: "POST",
+				headers: { "content-type": "application/json" },
+				body: JSON.stringify({ channelId: "#general", createdBy: "alice" }),
+			});
+
+			const created = await readEvent(
+				reader,
+				decoder,
+				buf,
+				(e) => e.type === "channel_created",
+			);
+			const channel = (created as { channel: { channelId: string } }).channel;
+			assert.equal(channel.channelId, "#general");
+
+			await fetch(`${baseUrl}/api/channel_subscribe`, {
+				method: "POST",
+				headers: { "content-type": "application/json" },
+				body: JSON.stringify({ channelId: "#general", topicId: "alice" }),
+			});
+			const subA = await readEvent(
+				reader,
+				decoder,
+				buf,
+				(e) => e.type === "channel_subscribed",
+			);
+			assert.equal((subA as { topicId: string }).topicId, "alice");
+
+			await fetch(`${baseUrl}/api/channel_subscribe`, {
+				method: "POST",
+				headers: { "content-type": "application/json" },
+				body: JSON.stringify({ channelId: "#general", topicId: "bob" }),
+			});
+			const subB = await readEvent(
+				reader,
+				decoder,
+				buf,
+				(e) =>
+					e.type === "channel_subscribed" &&
+					(e as { topicId: string }).topicId === "bob",
+			);
+			assert.equal((subB as { topicId: string }).topicId, "bob");
+
+			await fetch(`${baseUrl}/api/channel_send`, {
+				method: "POST",
+				headers: { "content-type": "application/json" },
+				body: JSON.stringify({
+					channelId: "#general",
+					from: "alice",
+					subject: "hello",
+					body: "hi all",
+				}),
+			});
+
+			const published = await readEvent(
+				reader,
+				decoder,
+				buf,
+				(e) => e.type === "channel_message_published",
+			);
+			const pub = published as {
+				from: string;
+				deliveredTo: string[];
+				channelId: string;
+			};
+			assert.equal(pub.from, "alice");
+			assert.equal(pub.channelId, "#general");
+			assert.deepEqual(pub.deliveredTo, ["bob"]);
+
+			await fetch(`${baseUrl}/api/channel_unsubscribe`, {
+				method: "POST",
+				headers: { "content-type": "application/json" },
+				body: JSON.stringify({ channelId: "#general", topicId: "bob" }),
+			});
+			const unsub = await readEvent(
+				reader,
+				decoder,
+				buf,
+				(e) => e.type === "channel_unsubscribed",
+			);
+			assert.equal((unsub as { topicId: string }).topicId, "bob");
 		} finally {
 			controller.abort();
 		}
