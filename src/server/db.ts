@@ -31,7 +31,8 @@ CREATE TABLE IF NOT EXISTS sessions (
 	topic_id TEXT PRIMARY KEY,
 	connected_at TEXT NOT NULL,
 	last_seen_at TEXT NOT NULL,
-	status TEXT NOT NULL
+	status TEXT NOT NULL,
+	last_activity_at TEXT
 );
 
 CREATE TABLE IF NOT EXISTS messages (
@@ -87,6 +88,7 @@ interface SessionRow {
 	connected_at: string;
 	last_seen_at: string;
 	status: string;
+	last_activity_at: string | null;
 }
 
 interface MessageRow {
@@ -173,6 +175,16 @@ export function openDatabase(dbPath: string) {
 		);
 	}
 
+	const sessionsCols = db
+		.prepare<[], { name: string }>("PRAGMA table_info(sessions)")
+		.all();
+	const hasLastActivityAt = sessionsCols.some(
+		(c) => c.name === "last_activity_at",
+	);
+	if (!hasLastActivityAt) {
+		db.exec("ALTER TABLE sessions ADD COLUMN last_activity_at TEXT");
+	}
+
 	const stmtGetSession = db.prepare<[string], SessionRow>(
 		"SELECT * FROM sessions WHERE topic_id = ?",
 	);
@@ -194,6 +206,13 @@ export function openDatabase(dbPath: string) {
 	const stmtTouchLastSeen = db.prepare<[string, string]>(
 		"UPDATE sessions SET last_seen_at = ? WHERE topic_id = ?",
 	);
+	const stmtUpdateLastActivity = db.prepare<[string, string]>(
+		"UPDATE sessions SET last_activity_at = ? WHERE topic_id = ?",
+	);
+	const stmtSelectLastActivity = db.prepare<
+		[string],
+		{ last_activity_at: string | null }
+	>("SELECT last_activity_at FROM sessions WHERE topic_id = ?");
 	const stmtListSessionsWithQueue = db.prepare<
 		[],
 		SessionRow & { queue_length: number }
@@ -340,6 +359,15 @@ export function openDatabase(dbPath: string) {
 
 	function touchLastSeen(topicId: TopicId, now: IsoTimestamp): void {
 		stmtTouchLastSeen.run(now, topicId);
+	}
+
+	function updateLastActivity(topicId: TopicId, now: IsoTimestamp): void {
+		stmtUpdateLastActivity.run(now, topicId);
+	}
+
+	function inspectLastActivityAt(topicId: TopicId): string | null {
+		const row = stmtSelectLastActivity.get(topicId);
+		return row?.last_activity_at ?? null;
 	}
 
 	function getSession(topicId: TopicId): PeerDto | null {
@@ -516,6 +544,8 @@ export function openDatabase(dbPath: string) {
 			unregisterTx(topicId, purge),
 		markDisconnected,
 		touchLastSeen,
+		updateLastActivity,
+		inspectLastActivityAt,
 		getSession,
 		listSessions,
 		insertMessage,
