@@ -161,7 +161,7 @@ MCP register 도구의 description에 *"register 성공 후 반드시 `monitorCo
 
 - 인증/인가, TLS
 - 메시지 암호화
-- broadcast / fan-out (1:1만 지원)
+- broadcast / fan-out (1:1만 지원) — channels (multi-subscriber pub-sub) 로 해제됨. 자세한 사항은 [.claude/PRPs/prds/channels.prd.md](.claude/PRPs/prds/channels.prd.md) 참조
 - 메시지 priority, scheduling
 - 파일 첨부
 - 메트릭 외부 통합 (Prometheus 등)
