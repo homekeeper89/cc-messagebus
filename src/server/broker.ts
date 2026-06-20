@@ -169,6 +169,7 @@ export function createBroker(db: CcDatabase, opts: BrokerOptions): Broker {
 		};
 		db.insertMessage(message);
 		db.touchLastSeen(req.from, now);
+		db.updateLastActivity(req.from, now);
 		emit({ type: "message_sent", message });
 		return { messageId: message.id, sentAt: now };
 	}
@@ -186,6 +187,7 @@ export function createBroker(db: CcDatabase, opts: BrokerOptions): Broker {
 		const max = req.max ?? READ_MAX_DEFAULT;
 		const messages = db.fetchDeliverable(req.topicId, max, now, inFlightUntil);
 		db.touchLastSeen(req.topicId, now);
+		db.updateLastActivity(req.topicId, now);
 		for (const m of messages) {
 			emit({
 				type: "message_read",
@@ -227,6 +229,7 @@ export function createBroker(db: CcDatabase, opts: BrokerOptions): Broker {
 			throw e;
 		}
 		db.touchLastSeen(req.topicId, now);
+		db.updateLastActivity(req.topicId, now);
 		emit({
 			type: "message_acked",
 			messageId: req.messageId,
@@ -307,6 +310,7 @@ export function createBroker(db: CcDatabase, opts: BrokerOptions): Broker {
 			throw e;
 		}
 		db.touchLastSeen(req.topicId, now);
+		db.updateLastActivity(req.topicId, now);
 		emit({
 			type: "channel_subscribed",
 			channelId: req.channelId,
@@ -354,6 +358,7 @@ export function createBroker(db: CcDatabase, opts: BrokerOptions): Broker {
 			throw e;
 		}
 		db.touchLastSeen(req.from, now);
+		db.updateLastActivity(req.from, now);
 		result.deliveredTo.forEach((subscriberId, i) => {
 			const fanoutMessage: MessageDto = {
 				id: deliveryMessageIds[i] as MessageId,
