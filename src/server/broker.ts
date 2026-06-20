@@ -7,11 +7,16 @@ import type {
 	ChannelCreateRequest,
 	ChannelCreateResponse,
 	ChannelDto,
+	ChannelHistoryRequest,
+	ChannelHistoryResponse,
+	ChannelMessageDto,
 	ChannelMessageId,
 	ChannelSendRequest,
 	ChannelSendResponse,
 	ChannelSubscribeRequest,
 	ChannelSubscribeResponse,
+	ChannelUnsubscribeRequest,
+	ChannelUnsubscribeResponse,
 	ListPeersResponse,
 	MessageDto,
 	MessageId,
@@ -43,6 +48,8 @@ export interface BrokerOptions {
 	visibilityTimeoutSec: number;
 	ttlDays: number;
 	dashboardUrl: string;
+	// 테스트에서 monotonic timestamp 주입 hook. production 은 default 사용.
+	clock?: () => string;
 }
 
 export interface Broker {
@@ -57,15 +64,18 @@ export interface Broker {
 	channelCreate: (req: ChannelCreateRequest) => ChannelCreateResponse;
 	channelSubscribe: (req: ChannelSubscribeRequest) => ChannelSubscribeResponse;
 	channelSend: (req: ChannelSendRequest) => ChannelSendResponse;
+	channelUnsubscribe: (
+		req: ChannelUnsubscribeRequest,
+	) => ChannelUnsubscribeResponse;
+	channelHistory: (req: ChannelHistoryRequest) => ChannelHistoryResponse;
 }
+
+const HISTORY_LIMIT_DEFAULT = 50;
+export const HISTORY_LIMIT_MAX = 200;
 
 const READ_MAX_DEFAULT = 50;
 const MS_PER_DAY = 24 * 60 * 60 * 1000;
 const MS_PER_SEC = 1000;
-
-function nowIso(): string {
-	return new Date().toISOString();
-}
 
 function plusSeconds(iso: string, sec: number): string {
 	return new Date(new Date(iso).getTime() + sec * MS_PER_SEC).toISOString();
@@ -76,6 +86,7 @@ function plusDays(iso: string, days: number): string {
 }
 
 export function createBroker(db: CcDatabase, opts: BrokerOptions): Broker {
+	const nowIso = opts.clock ?? ((): string => new Date().toISOString());
 	const events = new EventEmitter();
 	// dashboard /events 와 /tail 다중 연결 시 listener 가 빠르게 누적되어
 	// 정상 동작인데도 MaxListenersExceededWarning 이 stderr 로 새는 것을 방지.
@@ -373,6 +384,86 @@ export function createBroker(db: CcDatabase, opts: BrokerOptions): Broker {
 		};
 	}
 
+	function channelUnsubscribe(
+		req: ChannelUnsubscribeRequest,
+	): ChannelUnsubscribeResponse {
+		const subscriber = db.getSession(req.topicId);
+		if (!subscriber) {
+			throw new BrokerError(
+				"TOPIC_NOT_FOUND",
+				`subscriber topic '${req.topicId}' is not registered`,
+			);
+		}
+		const now = nowIso();
+		try {
+			db.unsubscribeChannel(req.channelId, req.topicId);
+		} catch (e) {
+			if (e instanceof DbError && e.code === "CHANNEL_NOT_FOUND") {
+				throw new BrokerError(
+					"CHANNEL_NOT_FOUND",
+					`channel '${req.channelId}' not found`,
+				);
+			}
+			if (e instanceof DbError && e.code === "NOT_SUBSCRIBED") {
+				throw new BrokerError(
+					"NOT_SUBSCRIBED",
+					`topic '${req.topicId}' is not subscribed to '${req.channelId}'`,
+				);
+			}
+			throw e;
+		}
+		db.touchLastSeen(req.topicId, now);
+		emit({
+			type: "channel_unsubscribed",
+			channelId: req.channelId,
+			topicId: req.topicId,
+			at: now,
+		});
+		return { unsubscribedAt: now };
+	}
+
+	// PRD `channels.prd.md` "What We're NOT Building": ACL 없음 — 누구나 read 가능.
+	// `requireTopicId` 없이 anonymous 호출 허용은 의도된 정책.
+	function channelHistory(req: ChannelHistoryRequest): ChannelHistoryResponse {
+		const requestedLimit = req.limit ?? HISTORY_LIMIT_DEFAULT;
+		if (requestedLimit < 1 || requestedLimit > HISTORY_LIMIT_MAX) {
+			throw new BrokerError(
+				"VALIDATION_FAILED",
+				`limit must be between 1 and ${HISTORY_LIMIT_MAX}`,
+			);
+		}
+		let rows: ReturnType<typeof db.fetchChannelHistory>;
+		try {
+			rows = db.fetchChannelHistory(
+				req.channelId,
+				requestedLimit,
+				req.beforeSentAt ?? null,
+			);
+		} catch (e) {
+			if (e instanceof DbError && e.code === "CHANNEL_NOT_FOUND") {
+				throw new BrokerError(
+					"CHANNEL_NOT_FOUND",
+					`channel '${req.channelId}' not found`,
+				);
+			}
+			throw e;
+		}
+		const hasMore = rows.length > requestedLimit;
+		const trimmed = hasMore ? rows.slice(0, requestedLimit) : rows;
+		const messages: ChannelMessageDto[] = trimmed.map((row) => ({
+			channelMessageId: row.id as ChannelMessageId,
+			channelId: row.channel_id,
+			from: row.from_topic_id,
+			subject: row.subject,
+			body: row.body,
+			sentAt: row.sent_at,
+			// expiresAt 은 `channel_messages` 컬럼이 아니라 sent_at + ttlDays 로 derive.
+			// TTL 정책이 바뀌면 historic 메시지의 응답 expiresAt 도 함께 바뀐다 — 의도된 설계.
+			expiresAt: plusDays(row.sent_at, opts.ttlDays),
+		}));
+		return { messages, hasMore };
+	}
+
 	return {
 		events,
 		register,
@@ -385,5 +476,7 @@ export function createBroker(db: CcDatabase, opts: BrokerOptions): Broker {
 		channelCreate,
 		channelSubscribe,
 		channelSend,
+		channelUnsubscribe,
+		channelHistory,
 	};
 }

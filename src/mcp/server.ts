@@ -117,6 +117,21 @@ export async function dispatch(
 				body: args.body as string,
 			});
 		}
+		case MCP_TOOL_NAMES.channelUnsubscribe: {
+			const topicId = requireTopicId();
+			return client.channelUnsubscribe({
+				channelId: args.channelId as string,
+				topicId,
+			});
+		}
+		case MCP_TOOL_NAMES.channelHistory: {
+			// PRD: ACL 없음 — 누구나 read 가능. requireTopicId 의도적으로 호출 안 함.
+			return client.channelHistory({
+				channelId: args.channelId as string,
+				limit: args.limit as number | undefined,
+				beforeSentAt: args.beforeSentAt as string | undefined,
+			});
+		}
 		default:
 			throw new McpClientError("UNKNOWN_TOOL", `unknown tool: ${name}`);
 	}

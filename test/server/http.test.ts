@@ -472,6 +472,110 @@ describe("http", () => {
 		assert.equal(res.statusCode, 404);
 		assert.equal(res.json().error.code, "CHANNEL_NOT_FOUND");
 	});
+
+	test("POST /api/channel_unsubscribe returns ok + unsubscribedAt", async () => {
+		for (const topicId of ["alice", "bob"]) {
+			await server.app.inject({
+				method: "POST",
+				url: "/api/register",
+				payload: { topicId },
+			});
+		}
+		await server.app.inject({
+			method: "POST",
+			url: "/api/channel_create",
+			payload: { channelId: "general", createdBy: "alice" },
+		});
+		await server.app.inject({
+			method: "POST",
+			url: "/api/channel_subscribe",
+			payload: { channelId: "general", topicId: "bob" },
+		});
+		const res = await server.app.inject({
+			method: "POST",
+			url: "/api/channel_unsubscribe",
+			payload: { channelId: "general", topicId: "bob" },
+		});
+		assert.equal(res.statusCode, 200);
+		const body = res.json();
+		assert.equal(body.ok, true);
+		assert.ok(body.unsubscribedAt);
+	});
+
+	test("POST /api/channel_unsubscribe without prior subscribe returns 404 + NOT_SUBSCRIBED", async () => {
+		for (const topicId of ["alice", "bob"]) {
+			await server.app.inject({
+				method: "POST",
+				url: "/api/register",
+				payload: { topicId },
+			});
+		}
+		await server.app.inject({
+			method: "POST",
+			url: "/api/channel_create",
+			payload: { channelId: "general", createdBy: "alice" },
+		});
+		const res = await server.app.inject({
+			method: "POST",
+			url: "/api/channel_unsubscribe",
+			payload: { channelId: "general", topicId: "bob" },
+		});
+		assert.equal(res.statusCode, 404);
+		assert.equal(res.json().error.code, "NOT_SUBSCRIBED");
+	});
+
+	test("POST /api/channel_history returns messages DESC + hasMore=false on small set", async () => {
+		await server.app.inject({
+			method: "POST",
+			url: "/api/register",
+			payload: { topicId: "alice" },
+		});
+		await server.app.inject({
+			method: "POST",
+			url: "/api/channel_create",
+			payload: { channelId: "general", createdBy: "alice" },
+		});
+		await server.app.inject({
+			method: "POST",
+			url: "/api/channel_send",
+			payload: {
+				channelId: "general",
+				from: "alice",
+				subject: "s",
+				body: "b",
+			},
+		});
+		const res = await server.app.inject({
+			method: "POST",
+			url: "/api/channel_history",
+			payload: { channelId: "general" },
+		});
+		assert.equal(res.statusCode, 200);
+		const body = res.json();
+		assert.equal(body.ok, true);
+		assert.equal(body.messages.length, 1);
+		assert.equal(body.hasMore, false);
+		assert.ok(body.messages[0].expiresAt);
+	});
+
+	test("POST /api/channel_history with out-of-range limit returns 400 VALIDATION_FAILED", async () => {
+		await server.app.inject({
+			method: "POST",
+			url: "/api/register",
+			payload: { topicId: "alice" },
+		});
+		await server.app.inject({
+			method: "POST",
+			url: "/api/channel_create",
+			payload: { channelId: "general", createdBy: "alice" },
+		});
+		const res = await server.app.inject({
+			method: "POST",
+			url: "/api/channel_history",
+			payload: { channelId: "general", limit: 999 },
+		});
+		assert.equal(res.statusCode, 400);
+	});
 });
 
 describe("tail SSE", () => {
