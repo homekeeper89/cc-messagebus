@@ -23,7 +23,12 @@ import {
 	SSE_HEARTBEAT_INTERVAL_SEC,
 	serializeSseEvent,
 } from "../protocol/sse.js";
-import { type Broker, BrokerError, createBroker } from "./broker.js";
+import {
+	type Broker,
+	BrokerError,
+	createBroker,
+	HISTORY_LIMIT_MAX,
+} from "./broker.js";
 import { type CleanupHandle, startCleanup } from "./cleanup.js";
 import { type CcDatabase, openDatabase } from "./db.js";
 
@@ -140,7 +145,7 @@ const CHANNEL_HISTORY_BODY = {
 	type: "object",
 	properties: {
 		channelId: CHANNEL_ID_SCHEMA,
-		limit: { type: "integer", minimum: 1, maximum: 200 },
+		limit: { type: "integer", minimum: 1, maximum: HISTORY_LIMIT_MAX },
 		beforeSentAt: ISO_TIMESTAMP_SCHEMA,
 	},
 	required: ["channelId"],

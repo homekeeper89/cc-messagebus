@@ -125,6 +125,7 @@ export async function dispatch(
 			});
 		}
 		case MCP_TOOL_NAMES.channelHistory: {
+			// PRD: ACL 없음 — 누구나 read 가능. requireTopicId 의도적으로 호출 안 함.
 			return client.channelHistory({
 				channelId: args.channelId as string,
 				limit: args.limit as number | undefined,
