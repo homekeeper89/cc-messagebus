@@ -102,6 +102,11 @@ const LIST_PEERS_BODY = {
 	properties: {},
 	additionalProperties: false,
 };
+const LIST_CHANNELS_BODY = {
+	type: "object",
+	properties: {},
+	additionalProperties: false,
+};
 const CHANNEL_CREATE_BODY = {
 	type: "object",
 	properties: {
@@ -232,6 +237,12 @@ export function createServer(opts: ServerOptions): Server {
 		HTTP_ENDPOINTS.listPeers.path,
 		{ schema: { body: LIST_PEERS_BODY } },
 		async () => ({ ok: true, ...broker.listPeers() }),
+	);
+
+	app.post(
+		HTTP_ENDPOINTS.listChannels.path,
+		{ schema: { body: LIST_CHANNELS_BODY } },
+		async () => ({ ok: true, ...broker.listChannels() }),
 	);
 
 	app.post<{ Body: ChannelCreateRequest }>(

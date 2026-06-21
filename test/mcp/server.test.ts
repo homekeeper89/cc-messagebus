@@ -21,6 +21,7 @@ interface CallLog {
 	read: { topicId: string; max?: number }[];
 	ack: { topicId: string; messageId: string }[];
 	listPeers: number;
+	listChannels: number;
 	channelCreate: { channelId: string; createdBy: string }[];
 	channelSubscribe: { channelId: string; topicId: string }[];
 	channelSend: {
@@ -48,6 +49,7 @@ function makeMockClient(overrides: Partial<BrokerClient> = {}): {
 		read: [],
 		ack: [],
 		listPeers: 0,
+		listChannels: 0,
 		channelCreate: [],
 		channelSubscribe: [],
 		channelSend: [],
@@ -82,6 +84,10 @@ function makeMockClient(overrides: Partial<BrokerClient> = {}): {
 		listPeers: async () => {
 			calls.listPeers += 1;
 			return { peers: [] };
+		},
+		listChannels: async () => {
+			calls.listChannels += 1;
+			return { channels: [] };
 		},
 		channelCreate: async (req) => {
 			calls.channelCreate.push(req);
@@ -123,7 +129,7 @@ const noopSpawn: SpawnCmd = { exe: "/bin/true", args: [] };
 describe("mcp/server.buildToolList", () => {
 	it("returns all tools matching protocol/mcp.ts", () => {
 		const tools = buildToolList();
-		assert.equal(tools.length, 11);
+		assert.equal(tools.length, 12);
 		const keys = Object.keys(MCP_TOOL_NAMES) as McpToolKey[];
 		for (const key of keys) {
 			const found = tools.find((t) => t.name === MCP_TOOL_NAMES[key]);
@@ -225,6 +231,15 @@ describe("mcp/server.dispatch", () => {
 		};
 		assert.equal(calls.listPeers, 1);
 		assert.deepEqual(res.peers, []);
+	});
+
+	it("list_channels does not require register", async () => {
+		const { client, calls } = makeMockClient();
+		const res = (await dispatch(client, noopSpawn, "list_channels", {})) as {
+			channels: unknown[];
+		};
+		assert.equal(calls.listChannels, 1);
+		assert.deepEqual(res.channels, []);
 	});
 
 	it("channel_create injects createdBy from session", async () => {

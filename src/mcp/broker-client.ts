@@ -13,6 +13,7 @@ import {
 	type ChannelUnsubscribeRequest,
 	type ChannelUnsubscribeResponse,
 	HTTP_ENDPOINTS,
+	type ListChannelsResponse,
 	type ListPeersResponse,
 	type ReadRequest,
 	type ReadResponse,
@@ -42,6 +43,7 @@ export interface BrokerClient {
 	read: (req: ReadRequest) => Promise<ReadResponse>;
 	ack: (req: AckRequest) => Promise<AckResponse>;
 	listPeers: () => Promise<ListPeersResponse>;
+	listChannels: () => Promise<ListChannelsResponse>;
 	channelCreate: (req: ChannelCreateRequest) => Promise<ChannelCreateResponse>;
 	channelSubscribe: (
 		req: ChannelSubscribeRequest,
@@ -111,6 +113,11 @@ export function createBrokerClient(baseUrl: string): BrokerClient {
 		listPeers: () =>
 			call<Record<string, never>, ListPeersResponse>(
 				HTTP_ENDPOINTS.listPeers.path,
+				{},
+			),
+		listChannels: () =>
+			call<Record<string, never>, ListChannelsResponse>(
+				HTTP_ENDPOINTS.listChannels.path,
 				{},
 			),
 		channelCreate: (req) =>

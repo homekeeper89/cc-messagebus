@@ -17,6 +17,7 @@ import type {
 	ChannelSubscribeResponse,
 	ChannelUnsubscribeRequest,
 	ChannelUnsubscribeResponse,
+	ListChannelsResponse,
 	ListPeersResponse,
 	MessageDto,
 	MessageId,
@@ -60,6 +61,7 @@ export interface Broker {
 	read: (req: ReadRequest) => ReadResponse;
 	ack: (req: AckRequest) => AckResponse;
 	listPeers: () => ListPeersResponse;
+	listChannels: () => ListChannelsResponse;
 	disconnect: (topicId: TopicId) => void;
 	channelCreate: (req: ChannelCreateRequest) => ChannelCreateResponse;
 	channelSubscribe: (req: ChannelSubscribeRequest) => ChannelSubscribeResponse;
@@ -241,6 +243,10 @@ export function createBroker(db: CcDatabase, opts: BrokerOptions): Broker {
 
 	function listPeers(): ListPeersResponse {
 		return { peers: db.listSessions() };
+	}
+
+	function listChannels(): ListChannelsResponse {
+		return { channels: db.listChannelSummaries() };
 	}
 
 	function disconnect(topicId: string): void {
@@ -477,6 +483,7 @@ export function createBroker(db: CcDatabase, opts: BrokerOptions): Broker {
 		read,
 		ack,
 		listPeers,
+		listChannels,
 		disconnect,
 		channelCreate,
 		channelSubscribe,
