@@ -137,6 +137,7 @@ function rowToPeer(row: SessionRow, queueLength: number): PeerDto {
 		status: row.status as PeerDto["status"],
 		connectedAt: row.connected_at,
 		lastSeenAt: row.last_seen_at,
+		lastActivityAt: row.last_activity_at,
 		queueLength,
 	};
 }
@@ -225,7 +226,7 @@ export function openDatabase(dbPath: string) {
 		   WHERE acked_at IS NULL
 		   GROUP BY to_topic
 		 ) q ON q.to_topic = s.topic_id
-		 ORDER BY s.connected_at ASC`,
+		 ORDER BY s.last_activity_at DESC NULLS LAST, s.connected_at ASC`,
 	);
 	const stmtCountQueue = db.prepare<[string], { c: number }>(
 		"SELECT COUNT(*) AS c FROM messages WHERE to_topic = ? AND acked_at IS NULL",
@@ -341,6 +342,7 @@ export function openDatabase(dbPath: string) {
 			status: SessionStatus.CONNECTED,
 			connectedAt: now,
 			lastSeenAt: now,
+			lastActivityAt: null,
 			queueLength: stmtCountQueue.get(topicId)?.c ?? 0,
 		};
 	}
