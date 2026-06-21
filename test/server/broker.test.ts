@@ -345,4 +345,85 @@ describe("broker", () => {
 			);
 		});
 	});
+
+	describe("list_peers ordering and lastActivityAt exposure", () => {
+		const FIXED_NOW = "2026-06-20T00:00:00.000Z";
+
+		test("listPeers exposes lastActivityAt as null for newly registered peer", () => {
+			const fixedBroker = createBroker(db, {
+				visibilityTimeoutSec: 30,
+				ttlDays: 30,
+				dashboardUrl: "http://localhost:5959",
+				clock: () => FIXED_NOW,
+			});
+			fixedBroker.register({ topicId: "alice" });
+			const peers = fixedBroker.listPeers().peers;
+			const alice = peers.find((p) => p.topicId === "alice");
+			assert.equal(alice?.lastActivityAt, null);
+		});
+
+		test("listPeers exposes lastActivityAt after send", () => {
+			const fixedBroker = createBroker(db, {
+				visibilityTimeoutSec: 30,
+				ttlDays: 30,
+				dashboardUrl: "http://localhost:5959",
+				clock: () => FIXED_NOW,
+			});
+			fixedBroker.register({ topicId: "alice" });
+			fixedBroker.register({ topicId: "bob" });
+			fixedBroker.send({
+				from: "alice",
+				to: "bob",
+				subject: "s",
+				body: "b",
+			});
+			const peers = fixedBroker.listPeers().peers;
+			const alice = peers.find((p) => p.topicId === "alice");
+			assert.equal(alice?.lastActivityAt, FIXED_NOW);
+		});
+
+		test("listPeers orders by last_activity_at DESC with NULLS last", () => {
+			let now = "2026-06-20T00:00:00.000Z";
+			const mutableBroker = createBroker(db, {
+				visibilityTimeoutSec: 30,
+				ttlDays: 30,
+				dashboardUrl: "http://localhost:5959",
+				clock: () => now,
+			});
+			mutableBroker.register({ topicId: "charlie" });
+			mutableBroker.register({ topicId: "alice" });
+			mutableBroker.register({ topicId: "bob" });
+			now = "2026-06-20T00:00:01.000Z";
+			mutableBroker.send({
+				from: "alice",
+				to: "alice",
+				subject: "s",
+				body: "b",
+			});
+			now = "2026-06-20T00:00:02.000Z";
+			mutableBroker.send({
+				from: "bob",
+				to: "bob",
+				subject: "s",
+				body: "b",
+			});
+			const topicIds = mutableBroker.listPeers().peers.map((p) => p.topicId);
+			assert.deepEqual(topicIds, ["bob", "alice", "charlie"]);
+		});
+
+		test("listPeers tie-breaks by connected_at ASC when both last_activity_at are NULL", () => {
+			let now = "2026-06-20T00:00:00.000Z";
+			const mutableBroker = createBroker(db, {
+				visibilityTimeoutSec: 30,
+				ttlDays: 30,
+				dashboardUrl: "http://localhost:5959",
+				clock: () => now,
+			});
+			mutableBroker.register({ topicId: "zulu" });
+			now = "2026-06-20T00:00:01.000Z";
+			mutableBroker.register({ topicId: "alpha" });
+			const topicIds = mutableBroker.listPeers().peers.map((p) => p.topicId);
+			assert.deepEqual(topicIds, ["zulu", "alpha"]);
+		});
+	});
 });
