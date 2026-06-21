@@ -2,6 +2,7 @@ import { mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 import Database from "better-sqlite3";
 import type {
+	ChannelSummaryDto,
 	IsoTimestamp,
 	MessageDto,
 	MessageId,
@@ -306,6 +307,25 @@ export function openDatabase(dbPath: string) {
 	>(
 		"SELECT subscriber_topic_id FROM channel_subscriptions WHERE channel_id = ?",
 	);
+	const stmtListChannelSummaries = db.prepare<
+		[],
+		{
+			id: string;
+			created_by: string;
+			created_at: string;
+			subscriber_count: number;
+			last_published_at: string | null;
+		}
+	>(
+		`SELECT c.id, c.created_by, c.created_at,
+		        COALESCE(COUNT(DISTINCT s.subscriber_topic_id), 0) AS subscriber_count,
+		        MAX(cm.sent_at) AS last_published_at
+		 FROM channels c
+		 LEFT JOIN channel_subscriptions s ON s.channel_id = c.id
+		 LEFT JOIN channel_messages cm ON cm.channel_id = c.id
+		 GROUP BY c.id
+		 ORDER BY MAX(cm.sent_at) DESC NULLS LAST, c.created_at ASC`,
+	);
 	const stmtInsertChannelMessage = db.prepare<
 		[string, string, string, string, string, string]
 	>(
@@ -497,6 +517,17 @@ export function openDatabase(dbPath: string) {
 			: stmtListChannelHistoryBefore.all(channelId, beforeSentAt, limit + 1);
 	}
 
+	function listChannelSummaries(): ChannelSummaryDto[] {
+		const rows = stmtListChannelSummaries.all();
+		return rows.map((r) => ({
+			channelId: r.id,
+			createdBy: r.created_by,
+			createdAt: r.created_at,
+			subscriberCount: r.subscriber_count,
+			lastPublishedAt: r.last_published_at,
+		}));
+	}
+
 	const channelSendTx = db.transaction(
 		(input: ChannelSendInput): { deliveredTo: TopicId[] } => {
 			const channel = stmtGetChannel.get(input.channelId);
@@ -566,6 +597,7 @@ export function openDatabase(dbPath: string) {
 			unsubscribeChannelTx(channelId, subscriberTopicId),
 		fetchChannelHistory,
 		listChannelSubscribers,
+		listChannelSummaries,
 		channelSend: (input: ChannelSendInput) => channelSendTx(input),
 		close: (): void => {
 			db.close();

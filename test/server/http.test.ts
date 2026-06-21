@@ -155,6 +155,44 @@ describe("http", () => {
 		assert.equal(body.peers[1].lastActivityAt, null);
 	});
 
+	test("POST /api/list_channels empty state returns []", async () => {
+		const res = await server.app.inject({
+			method: "POST",
+			url: "/api/list_channels",
+			payload: {},
+		});
+		assert.equal(res.statusCode, 200);
+		const body = res.json();
+		assert.equal(body.ok, true);
+		assert.deepEqual(body.channels, []);
+	});
+
+	test("POST /api/list_channels serializes lastPublishedAt as null for unused channel", async () => {
+		await server.app.inject({
+			method: "POST",
+			url: "/api/register",
+			payload: { topicId: "alice" },
+		});
+		await server.app.inject({
+			method: "POST",
+			url: "/api/channel_create",
+			payload: { channelId: "general", createdBy: "alice" },
+		});
+		const res = await server.app.inject({
+			method: "POST",
+			url: "/api/list_channels",
+			payload: {},
+		});
+		assert.equal(res.statusCode, 200);
+		const body = res.json();
+		assert.equal(body.ok, true);
+		assert.equal(body.channels.length, 1);
+		assert.equal(body.channels[0].channelId, "general");
+		assert.equal(body.channels[0].createdBy, "alice");
+		assert.equal(body.channels[0].subscriberCount, 0);
+		assert.equal(body.channels[0].lastPublishedAt, null);
+	});
+
 	test("e2e: register/send/read/ack via HTTP", async () => {
 		await server.app.inject({
 			method: "POST",
