@@ -124,6 +124,37 @@ describe("http", () => {
 		assert.deepEqual(body.peers, []);
 	});
 
+	test("POST /api/list_peers includes lastActivityAt and orders by it", async () => {
+		await server.app.inject({
+			method: "POST",
+			url: "/api/register",
+			payload: { topicId: "alice" },
+		});
+		await server.app.inject({
+			method: "POST",
+			url: "/api/send",
+			payload: { from: "alice", to: "alice", subject: "s", body: "b" },
+		});
+		await server.app.inject({
+			method: "POST",
+			url: "/api/register",
+			payload: { topicId: "bob" },
+		});
+		const res = await server.app.inject({
+			method: "POST",
+			url: "/api/list_peers",
+			payload: {},
+		});
+		assert.equal(res.statusCode, 200);
+		const body = res.json();
+		assert.equal(body.ok, true);
+		assert.equal(body.peers.length, 2);
+		assert.equal(body.peers[0].topicId, "alice");
+		assert.equal(typeof body.peers[0].lastActivityAt, "string");
+		assert.equal(body.peers[1].topicId, "bob");
+		assert.equal(body.peers[1].lastActivityAt, null);
+	});
+
 	test("e2e: register/send/read/ack via HTTP", async () => {
 		await server.app.inject({
 			method: "POST",

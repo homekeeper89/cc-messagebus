@@ -31,6 +31,7 @@ export interface PeerDto {
 	status: SessionStatus;
 	connectedAt: IsoTimestamp;
 	lastSeenAt: IsoTimestamp;
+	lastActivityAt: IsoTimestamp | null;
 	queueLength: number;
 }
 
