@@ -426,4 +426,105 @@ describe("broker", () => {
 			assert.deepEqual(topicIds, ["zulu", "alpha"]);
 		});
 	});
+
+	describe("list_channels", () => {
+		test("returns empty array when no channels exist", () => {
+			const res = broker.listChannels();
+			assert.deepEqual(res.channels, []);
+		});
+
+		test("returns channel with subscriberCount=0 and lastPublishedAt=null when no subscribers and no messages", () => {
+			let now = "2026-06-20T00:00:00.000Z";
+			const fixedBroker = createBroker(db, {
+				visibilityTimeoutSec: 30,
+				ttlDays: 30,
+				dashboardUrl: "http://localhost:5959",
+				clock: () => now,
+			});
+			fixedBroker.register({ topicId: "alice" });
+			now = "2026-06-20T00:00:01.000Z";
+			fixedBroker.channelCreate({ channelId: "general", createdBy: "alice" });
+			const res = fixedBroker.listChannels();
+			assert.equal(res.channels.length, 1);
+			assert.equal(res.channels[0].channelId, "general");
+			assert.equal(res.channels[0].createdBy, "alice");
+			assert.equal(res.channels[0].createdAt, "2026-06-20T00:00:01.000Z");
+			assert.equal(res.channels[0].subscriberCount, 0);
+			assert.equal(res.channels[0].lastPublishedAt, null);
+		});
+
+		test("counts distinct subscribers across multiple subscriptions", () => {
+			broker.register({ topicId: "alice" });
+			broker.register({ topicId: "bob" });
+			broker.register({ topicId: "carol" });
+			broker.channelCreate({ channelId: "ch1", createdBy: "alice" });
+			broker.channelSubscribe({ channelId: "ch1", topicId: "alice" });
+			broker.channelSubscribe({ channelId: "ch1", topicId: "bob" });
+			broker.channelSubscribe({ channelId: "ch1", topicId: "carol" });
+			const res = broker.listChannels();
+			assert.equal(res.channels.length, 1);
+			assert.equal(res.channels[0].subscriberCount, 3);
+		});
+
+		test("orders channels by lastPublishedAt DESC with NULLS last, tie-breaks by createdAt ASC", () => {
+			let now = "2026-06-20T00:00:00.000Z";
+			const mutableBroker = createBroker(db, {
+				visibilityTimeoutSec: 30,
+				ttlDays: 30,
+				dashboardUrl: "http://localhost:5959",
+				clock: () => now,
+			});
+			mutableBroker.register({ topicId: "alice" });
+			mutableBroker.register({ topicId: "bob" });
+			now = "2026-06-20T00:00:01.000Z";
+			mutableBroker.channelCreate({
+				channelId: "older-silent",
+				createdBy: "alice",
+			});
+			now = "2026-06-20T00:00:02.000Z";
+			mutableBroker.channelCreate({
+				channelId: "newer-silent",
+				createdBy: "alice",
+			});
+			now = "2026-06-20T00:00:03.000Z";
+			mutableBroker.channelCreate({
+				channelId: "old-active",
+				createdBy: "alice",
+			});
+			mutableBroker.channelSubscribe({
+				channelId: "old-active",
+				topicId: "bob",
+			});
+			now = "2026-06-20T00:00:04.000Z";
+			mutableBroker.channelCreate({
+				channelId: "new-active",
+				createdBy: "alice",
+			});
+			mutableBroker.channelSubscribe({
+				channelId: "new-active",
+				topicId: "bob",
+			});
+			now = "2026-06-20T00:00:05.000Z";
+			mutableBroker.channelSend({
+				channelId: "old-active",
+				from: "alice",
+				subject: "s",
+				body: "b",
+			});
+			now = "2026-06-20T00:00:06.000Z";
+			mutableBroker.channelSend({
+				channelId: "new-active",
+				from: "alice",
+				subject: "s",
+				body: "b",
+			});
+			const ids = mutableBroker.listChannels().channels.map((c) => c.channelId);
+			assert.deepEqual(ids, [
+				"new-active",
+				"old-active",
+				"older-silent",
+				"newer-silent",
+			]);
+		});
+	});
 });

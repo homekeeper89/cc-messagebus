@@ -7,6 +7,7 @@ import type {
 	ChannelSubscribeResponse,
 	ChannelUnsubscribeResponse,
 	IsoTimestamp,
+	ListChannelsResponse,
 	ListPeersResponse,
 	MessageId,
 	ReadResponse,
@@ -24,6 +25,7 @@ export const MCP_TOOL_NAMES = {
 	read: "read",
 	ack: "ack",
 	listPeers: "list_peers",
+	listChannels: "list_channels",
 	channelCreate: "channel_create",
 	channelSubscribe: "channel_subscribe",
 	channelSend: "channel_send",
@@ -67,6 +69,9 @@ export type AckToolOutput = AckResponse;
 
 export type ListPeersToolInput = Record<string, never>;
 export type ListPeersToolOutput = ListPeersResponse;
+
+export type ListChannelsToolInput = Record<string, never>;
+export type ListChannelsToolOutput = ListChannelsResponse;
 
 export interface ChannelCreateToolInput {
 	channelId: ChannelId;
@@ -112,6 +117,8 @@ export const MCP_TOOL_DESCRIPTIONS: Record<McpToolKey, string> = {
 	read: "Fetch unacked messages for this session. Each returned message enters in-flight state and must be ack-ed within the visibility timeout (default 30s) or it will be redelivered.",
 	ack: "Acknowledge a previously read message by id. Until ack, the message stays in-flight and may be redelivered.",
 	listPeers: "List all registered topics and their connection status.",
+	listChannels:
+		"List all pub-sub channels with subscriber count and last published timestamp. Sorted by most-recently-active first; channels with no messages appear last (creation time as tie-breaker).",
 	channelCreate:
 		"Create a new pub-sub channel. The current session's topicId is recorded as createdBy. Returns CHANNEL_ALREADY_EXISTS if the channelId is taken.",
 	channelSubscribe:
@@ -168,6 +175,11 @@ export const MCP_INPUT_SCHEMAS: Record<McpToolKey, JsonSchema> = {
 		additionalProperties: false,
 	},
 	listPeers: { type: "object", properties: {}, additionalProperties: false },
+	listChannels: {
+		type: "object",
+		properties: {},
+		additionalProperties: false,
+	},
 	channelCreate: {
 		type: "object",
 		properties: { channelId: CHANNEL_ID_SCHEMA },

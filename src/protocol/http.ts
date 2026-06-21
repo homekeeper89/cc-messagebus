@@ -41,6 +41,14 @@ export interface ChannelDto {
 	createdAt: IsoTimestamp;
 }
 
+export interface ChannelSummaryDto {
+	channelId: ChannelId;
+	createdBy: TopicId;
+	createdAt: IsoTimestamp;
+	subscriberCount: number;
+	lastPublishedAt: IsoTimestamp | null;
+}
+
 export interface ChannelMessageDto {
 	channelMessageId: ChannelMessageId;
 	channelId: ChannelId;
@@ -58,6 +66,7 @@ export const HTTP_ENDPOINTS = {
 	read: { method: "POST", path: "/api/read" },
 	ack: { method: "POST", path: "/api/ack" },
 	listPeers: { method: "POST", path: "/api/list_peers" },
+	listChannels: { method: "POST", path: "/api/list_channels" },
 	channelCreate: { method: "POST", path: "/api/channel_create" },
 	channelSubscribe: { method: "POST", path: "/api/channel_subscribe" },
 	channelSend: { method: "POST", path: "/api/channel_send" },
@@ -115,6 +124,11 @@ export interface ListPeersResponse {
 	peers: PeerDto[];
 }
 
+export type ListChannelsRequest = Record<string, never>;
+export interface ListChannelsResponse {
+	channels: ChannelSummaryDto[];
+}
+
 export interface ChannelCreateRequest {
 	channelId: ChannelId;
 	createdBy: TopicId;
@@ -167,6 +181,7 @@ export type SendApiResponse = ApiResponse<SendResponse>;
 export type ReadApiResponse = ApiResponse<ReadResponse>;
 export type AckApiResponse = ApiResponse<AckResponse>;
 export type ListPeersApiResponse = ApiResponse<ListPeersResponse>;
+export type ListChannelsApiResponse = ApiResponse<ListChannelsResponse>;
 export type ChannelCreateApiResponse = ApiResponse<ChannelCreateResponse>;
 export type ChannelSubscribeApiResponse = ApiResponse<ChannelSubscribeResponse>;
 export type ChannelSendApiResponse = ApiResponse<ChannelSendResponse>;
