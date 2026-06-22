@@ -1,3 +1,6 @@
+import { readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import {
@@ -19,6 +22,13 @@ import { ensureBrokerRunning, type SpawnCmd } from "./spawn.js";
 import { clearTopicId, requireTopicId, setTopicId } from "./state.js";
 
 const DEFAULT_BROKER_URL = "http://127.0.0.1:5959";
+
+const PKG_VERSION: string = (() => {
+	const here = dirname(fileURLToPath(import.meta.url));
+	const pkgPath = join(here, "..", "..", "package.json");
+	const raw = JSON.parse(readFileSync(pkgPath, "utf8")) as { version: string };
+	return raw.version;
+})();
 
 export interface RunMcpOptions {
 	baseUrl?: string;
@@ -153,7 +163,7 @@ export async function runMcp(opts: RunMcpOptions = {}): Promise<void> {
 	const spawnCmd = opts.spawnCmd ?? defaultSpawnCmd();
 
 	const server = new Server(
-		{ name: "cc-messagebus", version: "0.0.1" },
+		{ name: "cc-messagebus", version: PKG_VERSION },
 		{ capabilities: { tools: {} } },
 	);
 
