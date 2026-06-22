@@ -88,47 +88,85 @@
 				margin: 0 0 8px;
 				font-weight: 600;
 			}
-			#sessions {
+			.tree-row {
+				display: flex;
+				align-items: center;
+				gap: 8px;
+				padding: 6px 8px;
+				border-radius: 4px;
+				cursor: pointer;
+			}
+			.tree-row:hover {
+				background: rgba(88, 166, 255, 0.06);
+			}
+			.tree-row[data-selected="1"] {
+				background: rgba(88, 166, 255, 0.12);
+			}
+			.tree-row .tree-label {
+				flex: 1;
+				color: var(--text);
+				font-weight: 600;
+				letter-spacing: 0.04em;
+			}
+			.tree-section {
+				margin-top: 14px;
+			}
+			.tree-list {
 				list-style: none;
 				margin: 0;
 				padding: 0;
 			}
-			#sessions li {
+			.tree-list li {
 				display: flex;
 				align-items: center;
 				gap: 8px;
-				padding: 6px 4px;
+				padding: 6px 8px 6px 16px;
 				border-radius: 4px;
+				cursor: pointer;
 			}
-			#sessions li .dot {
+			.tree-list li:hover {
+				background: rgba(88, 166, 255, 0.06);
+			}
+			.tree-list li[data-selected="1"] {
+				background: rgba(88, 166, 255, 0.12);
+			}
+			.tree-list li .dot {
 				width: 8px;
 				height: 8px;
 				border-radius: 50%;
 				background: var(--muted);
 				flex-shrink: 0;
 			}
-			#sessions li[data-status="connected"] .dot {
+			.tree-list li[data-status="connected"] .dot {
 				background: var(--ok);
 			}
-			#sessions li[data-status="disconnected"] .dot {
+			.tree-list li[data-status="disconnected"] .dot {
 				background: var(--muted);
 				opacity: 0.5;
 			}
-			#sessions li .topic {
+			.tree-list li .name {
 				flex: 1;
 				color: var(--text);
+				overflow: hidden;
+				text-overflow: ellipsis;
+				white-space: nowrap;
 			}
-			#sessions li[data-status="disconnected"] .topic {
+			.tree-list li[data-status="disconnected"] .name {
 				color: var(--muted);
 			}
-			#sessions li .q {
+			.tree-list li .meta {
 				color: var(--muted);
 				font-size: 11px;
+				flex-shrink: 0;
 			}
-			#sessions .empty {
+			.tree-list .empty {
 				color: var(--muted);
 				font-style: italic;
-				padding: 4px;
+				padding: 4px 16px;
+				cursor: default;
+			}
+			.tree-list .empty:hover {
+				background: transparent;
 			}
 			section {
 				overflow-y: auto;
@@ -208,6 +246,10 @@
 				color: var(--muted);
 				font-style: italic;
 				padding: 4px;
+				cursor: default;
+			}
+			#flow .empty:hover {
+				background: transparent;
 			}
 		</style>
 	</head>
@@ -220,13 +262,30 @@
 		</header>
 		<main>
 			<aside>
-				<h2>Sessions <span id="sessions-count">(0)</span></h2>
-				<ul id="sessions">
-					<li class="empty">(no sessions)</li>
-				</ul>
+				<div class="tree-row" id="tree-all" data-selected="1">
+					<span class="tree-label">ALL</span>
+				</div>
+				<div class="tree-section">
+					<h2>Agents <span id="agents-count">(0)</span></h2>
+					<ul id="agents" class="tree-list">
+						<li class="empty">(no agents)</li>
+					</ul>
+				</div>
+				<div class="tree-section">
+					<h2>DMs</h2>
+					<div class="tree-row" id="tree-dms">
+						<span class="tree-label">DMs</span>
+					</div>
+				</div>
+				<div class="tree-section">
+					<h2>Channels <span id="channels-count">(0)</span></h2>
+					<ul id="channels" class="tree-list">
+						<li class="empty">(no channels)</li>
+					</ul>
+				</div>
 			</aside>
 			<section>
-				<h2>Message Flow</h2>
+				<h2 id="flow-header">Message Flow · ALL</h2>
 				<ol id="flow">
 					<li class="empty">(no events yet)</li>
 				</ol>
@@ -234,10 +293,21 @@
 		</main>
 		<script type="module">
 			const FLOW_CAP = 500;
+			const FLOW_BUFFER_CAP = 500;
+
 			const sessions = new Map();
-			const sessionsEl = document.getElementById("sessions");
-			const sessionsCountEl = document.getElementById("sessions-count");
+			const channels = new Map();
+			const flowBuffer = [];
+			let selectedContext = { type: "all" };
+
+			const agentsEl = document.getElementById("agents");
+			const agentsCountEl = document.getElementById("agents-count");
+			const channelsEl = document.getElementById("channels");
+			const channelsCountEl = document.getElementById("channels-count");
+			const treeAllEl = document.getElementById("tree-all");
+			const treeDmsEl = document.getElementById("tree-dms");
 			const flowEl = document.getElementById("flow");
+			const flowHeaderEl = document.getElementById("flow-header");
 			const statusEl = document.getElementById("status");
 			const statusTextEl = document.getElementById("status-text");
 
@@ -246,40 +316,128 @@
 				statusTextEl.textContent = text;
 			}
 
-			function renderSessions() {
-				sessionsCountEl.textContent = `(${sessions.size})`;
+			function timeLabel(iso) {
+				const d = iso ? new Date(iso) : new Date();
+				return d.toTimeString().slice(0, 8);
+			}
+
+			function relativeAgo(iso) {
+				if (!iso) return "—";
+				const diff = Date.now() - new Date(iso).getTime();
+				const s = Math.max(0, Math.floor(diff / 1000));
+				if (s < 60) return `${s}s`;
+				const m = Math.floor(s / 60);
+				if (m < 60) return `${m}m`;
+				const h = Math.floor(m / 60);
+				if (h < 24) return `${h}h`;
+				return `${Math.floor(h / 24)}d`;
+			}
+
+			function compareDescNullsLast(a, b) {
+				if (a === b) return 0;
+				if (a == null) return 1;
+				if (b == null) return -1;
+				return a < b ? 1 : -1;
+			}
+
+			function sameContext(a, b) {
+				if (a.type !== b.type) return false;
+				if (a.type === "agent") return a.topicId === b.topicId;
+				if (a.type === "channel") return a.channelId === b.channelId;
+				return true;
+			}
+
+			function renderTreeSelection() {
+				treeAllEl.dataset.selected = selectedContext.type === "all" ? "1" : "0";
+				treeDmsEl.dataset.selected = selectedContext.type === "dm" ? "1" : "0";
+			}
+
+			function renderFlowHeader() {
+				let label = "ALL";
+				if (selectedContext.type === "agent") label = selectedContext.topicId;
+				else if (selectedContext.type === "channel")
+					label = `#${selectedContext.channelId}`;
+				else if (selectedContext.type === "dm") label = "DMs";
+				flowHeaderEl.textContent = `Message Flow · ${label}`;
+			}
+
+			function renderAgents() {
+				agentsCountEl.textContent = `(${sessions.size})`;
 				if (sessions.size === 0) {
-					sessionsEl.replaceChildren();
+					agentsEl.replaceChildren();
 					const li = document.createElement("li");
 					li.className = "empty";
-					li.textContent = "(no sessions)";
-					sessionsEl.append(li);
+					li.textContent = "(no agents)";
+					agentsEl.append(li);
 					return;
 				}
 				const entries = [...sessions.values()].sort((a, b) =>
-					a.topicId.localeCompare(b.topicId),
+					compareDescNullsLast(a.lastActivityAt, b.lastActivityAt),
 				);
-				sessionsEl.replaceChildren(
+				agentsEl.replaceChildren(
 					...entries.map((p) => {
 						const li = document.createElement("li");
 						li.dataset.status = p.status ?? "connected";
+						li.dataset.topicId = p.topicId;
+						if (
+							selectedContext.type === "agent" &&
+							selectedContext.topicId === p.topicId
+						) {
+							li.dataset.selected = "1";
+						}
 						const dot = document.createElement("span");
 						dot.className = "dot";
-						const topic = document.createElement("span");
-						topic.className = "topic";
-						topic.textContent = p.topicId;
-						const q = document.createElement("span");
-						q.className = "q";
-						q.textContent = `q=${p.queueLength ?? 0}`;
-						li.append(dot, topic, q);
+						const name = document.createElement("span");
+						name.className = "name";
+						name.textContent = p.topicId;
+						const meta = document.createElement("span");
+						meta.className = "meta";
+						meta.textContent = relativeAgo(p.lastActivityAt);
+						li.append(dot, name, meta);
+						li.addEventListener("click", () =>
+							onTreeRowClick({ type: "agent", topicId: p.topicId }),
+						);
 						return li;
 					}),
 				);
 			}
 
-			function timeLabel(iso) {
-				const d = iso ? new Date(iso) : new Date();
-				return d.toTimeString().slice(0, 8);
+			function renderChannels() {
+				channelsCountEl.textContent = `(${channels.size})`;
+				if (channels.size === 0) {
+					channelsEl.replaceChildren();
+					const li = document.createElement("li");
+					li.className = "empty";
+					li.textContent = "(no channels)";
+					channelsEl.append(li);
+					return;
+				}
+				const entries = [...channels.values()].sort((a, b) =>
+					compareDescNullsLast(a.lastPublishedAt, b.lastPublishedAt),
+				);
+				channelsEl.replaceChildren(
+					...entries.map((c) => {
+						const li = document.createElement("li");
+						li.dataset.channelId = c.channelId;
+						if (
+							selectedContext.type === "channel" &&
+							selectedContext.channelId === c.channelId
+						) {
+							li.dataset.selected = "1";
+						}
+						const name = document.createElement("span");
+						name.className = "name";
+						name.textContent = `#${c.channelId}`;
+						const meta = document.createElement("span");
+						meta.className = "meta";
+						meta.textContent = relativeAgo(c.lastPublishedAt);
+						li.append(name, meta);
+						li.addEventListener("click", () =>
+							onTreeRowClick({ type: "channel", channelId: c.channelId }),
+						);
+						return li;
+					}),
+				);
 			}
 
 			function describe(event) {
@@ -343,22 +501,109 @@
 				}
 			}
 
+			function passesFilter(event) {
+				const ctx = selectedContext;
+				if (ctx.type === "all") return true;
+
+				if (ctx.type === "agent") {
+					const t = event.type;
+					if (t === "message_sent")
+						return (
+							event.message.from === ctx.topicId ||
+							event.message.to === ctx.topicId
+						);
+					if (t === "message_read" || t === "message_acked")
+						return event.topicId === ctx.topicId;
+					if (t === "session_registered")
+						return event.peer.topicId === ctx.topicId;
+					if (t === "session_disconnected") return event.topicId === ctx.topicId;
+					if (t === "channel_subscribed" || t === "channel_unsubscribed")
+						return event.topicId === ctx.topicId;
+					if (t === "channel_message_published")
+						return (
+							event.from === ctx.topicId ||
+							(event.deliveredTo ?? []).includes(ctx.topicId)
+						);
+					return false;
+				}
+
+				if (ctx.type === "channel") {
+					const t = event.type;
+					if (t === "channel_created")
+						return event.channel.channelId === ctx.channelId;
+					if (
+						t === "channel_subscribed" ||
+						t === "channel_unsubscribed" ||
+						t === "channel_message_published"
+					)
+						return event.channelId === ctx.channelId;
+					return false;
+				}
+
+				if (ctx.type === "dm") {
+					// NOTE: channel fanout emits message_sent without channelId marker,
+					// so DM filter passes all message_* events (PRD-decided "flat" DMs).
+					return event.type.startsWith("message_");
+				}
+
+				return false;
+			}
+
+			function pushFlowMaybe(event) {
+				flowBuffer.unshift(event);
+				if (flowBuffer.length > FLOW_BUFFER_CAP)
+					flowBuffer.length = FLOW_BUFFER_CAP;
+				if (passesFilter(event)) pushFlow(event);
+			}
+
+			function rerenderFlowWithCurrentFilter() {
+				flowEl.replaceChildren();
+				const matched = flowBuffer.filter(passesFilter);
+				if (matched.length === 0) {
+					const li = document.createElement("li");
+					li.className = "empty";
+					li.textContent =
+						selectedContext.type === "all"
+							? "(no events yet)"
+							: "(no events match filter)";
+					flowEl.append(li);
+					return;
+				}
+				for (let i = matched.length - 1; i >= 0; i--) pushFlow(matched[i]);
+			}
+
+			function onTreeRowClick(ctx) {
+				selectedContext = sameContext(selectedContext, ctx)
+					? { type: "all" }
+					: ctx;
+				renderTreeSelection();
+				renderAgents();
+				renderChannels();
+				renderFlowHeader();
+				rerenderFlowWithCurrentFilter();
+			}
+
+			treeAllEl.addEventListener("click", () =>
+				onTreeRowClick({ type: "all" }),
+			);
+			treeDmsEl.addEventListener("click", () => onTreeRowClick({ type: "dm" }));
+
 			function applySnapshot(peers) {
 				sessions.clear();
 				for (const p of peers) sessions.set(p.topicId, p);
-				renderSessions();
+				renderAgents();
 			}
 
 			function applyRegistered(peer) {
 				sessions.set(peer.topicId, { ...peer, status: "connected" });
-				renderSessions();
+				renderAgents();
 			}
 
 			function applyDisconnected(topicId) {
 				const existing = sessions.get(topicId);
 				if (existing) {
 					sessions.set(topicId, { ...existing, status: "disconnected" });
-					renderSessions();
+					renderAgents();
 				}
 			}
 
@@ -367,7 +612,68 @@
 				if (!existing) return;
 				const next = Math.max(0, (existing.queueLength ?? 0) + delta);
 				sessions.set(topicId, { ...existing, queueLength: next });
-				renderSessions();
+				renderAgents();
+			}
+
+			function applyLastActivity(topicId, at) {
+				const existing = sessions.get(topicId);
+				if (!existing) return;
+				sessions.set(topicId, { ...existing, lastActivityAt: at });
+				renderAgents();
+			}
+
+			function applyChannelCreated(channel) {
+				channels.set(channel.channelId, {
+					...channel,
+					subscriberCount: 0,
+					lastPublishedAt: null,
+				});
+				renderChannels();
+			}
+
+			function applyChannelSubscribed(channelId) {
+				const ch = channels.get(channelId);
+				if (!ch) return;
+				channels.set(channelId, {
+					...ch,
+					subscriberCount: (ch.subscriberCount ?? 0) + 1,
+				});
+				renderChannels();
+			}
+
+			function applyChannelUnsubscribed(channelId) {
+				const ch = channels.get(channelId);
+				if (!ch) return;
+				channels.set(channelId, {
+					...ch,
+					subscriberCount: Math.max(0, (ch.subscriberCount ?? 0) - 1),
+				});
+				renderChannels();
+			}
+
+			function applyChannelPublished(channelId, sentAt) {
+				const ch = channels.get(channelId);
+				if (!ch) return;
+				channels.set(channelId, { ...ch, lastPublishedAt: sentAt });
+				renderChannels();
+			}
+
+			async function loadInitialChannels() {
+				try {
+					const res = await fetch("/api/list_channels", {
+						method: "POST",
+						headers: { "Content-Type": "application/json" },
+						body: "{}",
+					});
+					const json = await res.json();
+					if (!json?.success) return;
+					for (const ch of json.data?.channels ?? []) {
+						channels.set(ch.channelId, ch);
+					}
+					renderChannels();
+				} catch {
+					// 무시: SSE channel_created로 점진 복구
+				}
 			}
 
 			function connect() {
@@ -383,47 +689,59 @@
 				es.addEventListener("session_registered", (e) => {
 					const data = JSON.parse(e.data);
 					applyRegistered(data.peer);
-					pushFlow(data);
+					pushFlowMaybe(data);
 				});
 				es.addEventListener("session_disconnected", (e) => {
 					const data = JSON.parse(e.data);
 					applyDisconnected(data.topicId);
-					pushFlow(data);
+					pushFlowMaybe(data);
 				});
 				es.addEventListener("message_sent", (e) => {
 					const data = JSON.parse(e.data);
 					applyQueueDelta(data.message.to, 1);
-					pushFlow(data);
+					applyLastActivity(data.message.from, data.message.sentAt);
+					applyLastActivity(data.message.to, data.message.sentAt);
+					pushFlowMaybe(data);
 				});
 				es.addEventListener("message_read", (e) => {
-					pushFlow(JSON.parse(e.data));
+					pushFlowMaybe(JSON.parse(e.data));
 				});
 				es.addEventListener("message_acked", (e) => {
 					const data = JSON.parse(e.data);
 					applyQueueDelta(data.topicId, -1);
-					pushFlow(data);
+					pushFlowMaybe(data);
 				});
 				es.addEventListener("message_redelivered", (e) => {
-					pushFlow(JSON.parse(e.data));
+					pushFlowMaybe(JSON.parse(e.data));
 				});
 				es.addEventListener("message_expired", (e) => {
-					pushFlow(JSON.parse(e.data));
+					pushFlowMaybe(JSON.parse(e.data));
 				});
 				es.addEventListener("channel_created", (e) => {
-					pushFlow(JSON.parse(e.data));
+					const data = JSON.parse(e.data);
+					applyChannelCreated(data.channel);
+					pushFlowMaybe(data);
 				});
 				es.addEventListener("channel_subscribed", (e) => {
-					pushFlow(JSON.parse(e.data));
+					const data = JSON.parse(e.data);
+					applyChannelSubscribed(data.channelId);
+					pushFlowMaybe(data);
 				});
 				es.addEventListener("channel_unsubscribed", (e) => {
-					pushFlow(JSON.parse(e.data));
+					const data = JSON.parse(e.data);
+					applyChannelUnsubscribed(data.channelId);
+					pushFlowMaybe(data);
 				});
 				es.addEventListener("channel_message_published", (e) => {
-					pushFlow(JSON.parse(e.data));
+					const data = JSON.parse(e.data);
+					applyChannelPublished(data.channelId, data.sentAt);
+					pushFlowMaybe(data);
 				});
 				es.addEventListener("heartbeat", () => {});
 			}
 
+			renderFlowHeader();
+			loadInitialChannels();
 			connect();
 		</script>
 	</body>
