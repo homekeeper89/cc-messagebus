@@ -104,28 +104,107 @@ cc-messagebus dashboard
 
 ## MCP Tools
 
+`register` 호출 후 같은 세션의 모든 도구는 `topicId` / `from` 을 암묵적으로 사용하므로 args 에서 생략합니다. 성공 응답은 아래 "Returns" 의 JSON 객체가 그대로 반환되고, 실패 시 `{ ok: false, error: { code, message } }` 가 반환됩니다.
+
 ### 1:1 Direct
 
-| Tool | Purpose |
-|---|---|
-| `register` | 토픽 등록. 응답에 `monitorCommand` 포함 (Claude 가 자동 실행) |
-| `unregister` | 토픽 해제. `purgeQueue` 옵션으로 큐 함께 비우기 |
-| `send` | 다른 토픽에 메시지 전송 (1:1) |
-| `read` | 자기 큐에서 메시지 pull (visibility timeout 시작) |
-| `ack` | 메시지 처리 완료 마킹 (생략 시 timeout 후 재배달) |
-| `list_peers` | 등록된 토픽 목록 조회 (`lastActivityAt DESC NULLS LAST` 정렬) |
+| Tool | Args | Returns | Errors |
+|---|---|---|---|
+| `register` | `{ topicId }` | `{ topicId, monitorCommand, dashboardUrl }` | `TOPIC_ALREADY_REGISTERED` |
+| `unregister` | `{ purgeQueue?: boolean }` | `{ purged: boolean }` | `TOPIC_NOT_FOUND` |
+| `send` | `{ to, subject, body, threadId? }` | `{ messageId, sentAt }` | `TOPIC_NOT_FOUND`, `PEER_NOT_FOUND` |
+| `read` | `{ max?: number }` (default 50) | `{ messages: MessageDto[] }` | `TOPIC_NOT_FOUND` |
+| `ack` | `{ messageId }` | `{ ackedAt }` | `TOPIC_NOT_FOUND`, `MESSAGE_NOT_FOUND`, `MESSAGE_NOT_IN_FLIGHT` |
+| `list_peers` | `{}` | `{ peers: PeerDto[] }` (`lastActivityAt DESC NULLS LAST`) | — |
 
 ### Channels (Pub-Sub)
 
-| Tool | Purpose |
-|---|---|
-| `list_channels` | 채널 메타 목록 + `subscriberCount` + `lastPublishedAt` |
-| `channel_create` | 채널 생성 (이미 존재하면 idempotent) |
-| `channel_subscribe` | 채널 구독. 이후 본인 큐로 fan-out 사본 수신 (replay 없음, history 는 `channel_history` 로) |
-| `channel_send` | 채널에 발행 → 모든 subscriber 큐에 fan-out 사본 |
-| `channel_unsubscribe` | 채널 구독 해제 |
-| `channel_history` | 채널 backlog 조회 (`limit`, `beforeSentAt` paging) |
-| `channel_detail` | 채널 헤더 + subscriber 별 `queueDepth` / `lastReadAt` |
+채널은 ACL 이 없습니다 — 누구나 `list_channels` / `channel_history` / `channel_detail` 호출 가능. `channel_subscribe` 는 그 시점 이후 발행분만 본인 큐로 fan-out 합니다 (replay 없음 — backlog 는 `channel_history`).
+
+| Tool | Args | Returns | Errors |
+|---|---|---|---|
+| `list_channels` | `{}` | `{ channels: ChannelSummaryDto[] }` | — |
+| `channel_create` | `{ channelId }` | `{ channel: ChannelDto }` | `TOPIC_NOT_FOUND`, `CHANNEL_ALREADY_EXISTS` |
+| `channel_subscribe` | `{ channelId }` | `{ subscribedAt }` | `TOPIC_NOT_FOUND`, `CHANNEL_NOT_FOUND`, `ALREADY_SUBSCRIBED` |
+| `channel_send` | `{ channelId, subject, body }` | `{ channelMessageId, deliveredTo: TopicId[], sentAt }` | `TOPIC_NOT_FOUND`, `CHANNEL_NOT_FOUND` |
+| `channel_unsubscribe` | `{ channelId }` | `{ unsubscribedAt }` | `TOPIC_NOT_FOUND`, `CHANNEL_NOT_FOUND`, `NOT_SUBSCRIBED` |
+| `channel_history` | `{ channelId, limit?: 1..200 (default 50), beforeSentAt? }` | `{ messages: ChannelMessageDto[], hasMore: boolean }` | `CHANNEL_NOT_FOUND`, `VALIDATION_FAILED` |
+| `channel_detail` | `{ channelId }` | `{ channel: ChannelDetailDto }` | `CHANNEL_NOT_FOUND` |
+
+### Response shapes
+
+```ts
+type IsoTimestamp = string  // ISO-8601 UTC, 예: "2026-06-22T08:54:00.000Z"
+
+interface MessageDto {
+  id: string
+  from: string
+  to: string
+  subject: string
+  body: string
+  threadId: string | null
+  sentAt: IsoTimestamp
+  inFlightUntil: IsoTimestamp | null  // read 후 visibility timeout 만료 시각
+  ackedAt: IsoTimestamp | null
+  expiresAt: IsoTimestamp              // TTL 기준 cleanup 시각
+}
+
+interface PeerDto {
+  topicId: string
+  status: "connected" | "disconnected"
+  connectedAt: IsoTimestamp
+  lastSeenAt: IsoTimestamp
+  lastActivityAt: IsoTimestamp | null  // send/read/ack 마지막 시각
+  queueLength: number                  // 미-ack 메시지 수
+}
+
+interface ChannelDto {
+  channelId: string
+  createdBy: string
+  createdAt: IsoTimestamp
+}
+
+interface ChannelSummaryDto extends ChannelDto {
+  subscriberCount: number
+  lastPublishedAt: IsoTimestamp | null
+}
+
+interface SubscriberDto {
+  topicId: string
+  subscribedAt: IsoTimestamp
+  queueDepth: number
+  lastReadAt: IsoTimestamp | null
+}
+
+interface ChannelDetailDto extends ChannelDto {
+  subscribers: SubscriberDto[]
+}
+
+interface ChannelMessageDto {
+  channelMessageId: string
+  channelId: string
+  from: string
+  subject: string
+  body: string
+  sentAt: IsoTimestamp
+  expiresAt: IsoTimestamp
+}
+```
+
+### Error codes
+
+| Code | When | Recovery |
+|---|---|---|
+| `TOPIC_ALREADY_REGISTERED` | 같은 `topicId` 가 이미 connected | `unregister` 후 재시도 |
+| `TOPIC_NOT_FOUND` | 호출 컨텍스트 토픽 (caller / from / subscriber) 미등록 | `register` 부터 |
+| `PEER_NOT_FOUND` | `send` 의 수신 토픽 미등록 | `list_peers` 로 확인 |
+| `MESSAGE_NOT_FOUND` | `ack` 대상이 본인 큐에 없음 (잘못된 id / TTL 만료) | id 검증 또는 무시 |
+| `MESSAGE_NOT_IN_FLIGHT` | 이미 acked 또는 한 번도 read 되지 않은 메시지 | 무시 가능 |
+| `CHANNEL_ALREADY_EXISTS` | `channel_create` 중복 | 무시 가능 (idempotent) |
+| `CHANNEL_NOT_FOUND` | 채널 미존재 | `channel_create` 또는 `list_channels` |
+| `ALREADY_SUBSCRIBED` | 이미 구독 중 | 무시 가능 |
+| `NOT_SUBSCRIBED` | unsubscribe 대상이 구독 상태 아님 | 무시 가능 |
+| `VALIDATION_FAILED` | 잘못된 인자 (예: `channel_history.limit` 가 1..200 범위 외) | args 확인 |
 
 ## Configuration
 
