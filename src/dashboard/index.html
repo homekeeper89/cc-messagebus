@@ -251,6 +251,74 @@
 			#flow .empty:hover {
 				background: transparent;
 			}
+			#detail h2 {
+				font-size: 14px;
+				text-transform: none;
+				letter-spacing: 0.02em;
+				color: var(--text);
+				margin: 0;
+				font-weight: 600;
+			}
+			#detail .muted-line {
+				color: var(--muted);
+				margin: 4px 0 12px;
+				font-size: 12px;
+			}
+			#detail .section-h {
+				font-size: 11px;
+				text-transform: uppercase;
+				letter-spacing: 0.08em;
+				color: var(--muted);
+				margin: 16px 0 8px;
+				font-weight: 600;
+			}
+			#detail .card-list {
+				list-style: none;
+				margin: 0;
+				padding: 0;
+			}
+			#detail .card-list li {
+				display: grid;
+				grid-template-columns: 1fr auto auto auto;
+				gap: 12px;
+				align-items: baseline;
+				padding: 8px 10px;
+				border: 1px solid var(--border);
+				border-radius: 4px;
+				margin-bottom: 6px;
+				background: rgba(255, 255, 255, 0.02);
+			}
+			#detail .card-list li.empty {
+				display: block;
+				border: none;
+				background: transparent;
+				color: var(--muted);
+				font-style: italic;
+				padding: 4px;
+			}
+			#detail .card-list li .topic {
+				color: var(--text);
+				font-weight: 600;
+			}
+			#detail .card-list li .stat {
+				color: var(--muted);
+				font-size: 12px;
+			}
+			#detail .card-list li[data-kind="history"] {
+				grid-template-columns: auto auto 1fr;
+			}
+			#detail .card-list li[data-kind="history"] .time {
+				color: var(--muted);
+			}
+			#detail .card-list li[data-kind="history"] .from {
+				color: var(--accent);
+			}
+			#detail .card-list li[data-kind="history"] .subject {
+				color: var(--text);
+				overflow: hidden;
+				text-overflow: ellipsis;
+				white-space: nowrap;
+			}
 		</style>
 	</head>
 	<body>
@@ -289,16 +357,37 @@
 				<ol id="flow">
 					<li class="empty">(no events yet)</li>
 				</ol>
+				<div id="detail" hidden>
+					<h2 id="detail-title">#</h2>
+					<p id="detail-meta" class="muted-line"></p>
+					<h3 class="section-h">
+						Subscribers <span id="detail-subscribers-count">(0)</span>
+					</h3>
+					<ul id="detail-subscribers" class="card-list">
+						<li class="empty">(no subscribers)</li>
+					</ul>
+					<h3 class="section-h">
+						History <span id="detail-history-meta">(0)</span>
+					</h3>
+					<ol id="detail-history" class="card-list">
+						<li class="empty">(no messages)</li>
+					</ol>
+				</div>
 			</section>
 		</main>
 		<script type="module">
 			const FLOW_CAP = 500;
 			const FLOW_BUFFER_CAP = 500;
+			const HISTORY_LIMIT = 50;
+			const HISTORY_REFRESH_DEBOUNCE_MS = 250;
 
 			const sessions = new Map();
 			const channels = new Map();
 			const flowBuffer = [];
 			let selectedContext = { type: "all" };
+			let channelDetail = null;
+			let channelHistory = [];
+			let historyRefreshTimer = null;
 
 			const agentsEl = document.getElementById("agents");
 			const agentsCountEl = document.getElementById("agents-count");
@@ -310,6 +399,15 @@
 			const flowHeaderEl = document.getElementById("flow-header");
 			const statusEl = document.getElementById("status");
 			const statusTextEl = document.getElementById("status-text");
+			const detailRoot = document.getElementById("detail");
+			const detailTitleEl = document.getElementById("detail-title");
+			const detailMetaEl = document.getElementById("detail-meta");
+			const detailSubsEl = document.getElementById("detail-subscribers");
+			const detailSubsCountEl = document.getElementById(
+				"detail-subscribers-count",
+			);
+			const detailHistEl = document.getElementById("detail-history");
+			const detailHistMetaEl = document.getElementById("detail-history-meta");
 
 			function setStatus(state, text) {
 				statusEl.dataset.state = state;
@@ -572,15 +670,170 @@
 				for (let i = matched.length - 1; i >= 0; i--) pushFlow(matched[i]);
 			}
 
+			function isDetailMode() {
+				return selectedContext.type === "channel";
+			}
+
+			function makeEmpty(text) {
+				const li = document.createElement("li");
+				li.className = "empty";
+				li.textContent = text;
+				return li;
+			}
+
+			function enterChannelDetail(channelId) {
+				flowHeaderEl.hidden = true;
+				flowEl.hidden = true;
+				detailRoot.hidden = false;
+				detailTitleEl.textContent = `#${channelId}`;
+				detailMetaEl.textContent = "loading…";
+				detailSubsCountEl.textContent = "(0)";
+				detailHistMetaEl.textContent = "(0)";
+				detailSubsEl.replaceChildren(makeEmpty("loading…"));
+				detailHistEl.replaceChildren(makeEmpty("loading…"));
+			}
+
+			function exitChannelDetail() {
+				flowHeaderEl.hidden = false;
+				flowEl.hidden = false;
+				detailRoot.hidden = true;
+				channelDetail = null;
+				channelHistory = [];
+				if (historyRefreshTimer) {
+					clearTimeout(historyRefreshTimer);
+					historyRefreshTimer = null;
+				}
+			}
+
+			function renderDetailHeader() {
+				if (!channelDetail) return;
+				detailTitleEl.textContent = `#${channelDetail.channelId}`;
+				const subCount = channelDetail.subscribers.length;
+				const created = new Date(channelDetail.createdAt).toLocaleString();
+				const noun = subCount === 1 ? "subscriber" : "subscribers";
+				detailMetaEl.textContent = `created by ${channelDetail.createdBy} · ${created} · ${subCount} ${noun}`;
+			}
+
+			function renderDetailSubscribers() {
+				if (!channelDetail) return;
+				const subs = channelDetail.subscribers;
+				detailSubsCountEl.textContent = `(${subs.length})`;
+				if (subs.length === 0) {
+					detailSubsEl.replaceChildren(makeEmpty("(no subscribers)"));
+					return;
+				}
+				detailSubsEl.replaceChildren(
+					...subs.map((s) => {
+						const li = document.createElement("li");
+						const topic = document.createElement("span");
+						topic.className = "topic";
+						topic.textContent = s.topicId;
+						const q = document.createElement("span");
+						q.className = "stat";
+						q.textContent = `queue ${s.queueDepth}`;
+						const lr = document.createElement("span");
+						lr.className = "stat";
+						lr.textContent = s.lastReadAt
+							? `last read ${relativeAgo(s.lastReadAt)} ago`
+							: "never read";
+						const sub = document.createElement("span");
+						sub.className = "stat";
+						sub.textContent = `subscribed ${relativeAgo(s.subscribedAt)} ago`;
+						li.append(topic, q, lr, sub);
+						return li;
+					}),
+				);
+			}
+
+			function renderDetailHistory() {
+				const msgs = channelHistory;
+				detailHistMetaEl.textContent = `(${msgs.length})`;
+				if (msgs.length === 0) {
+					detailHistEl.replaceChildren(makeEmpty("(no messages)"));
+					return;
+				}
+				detailHistEl.replaceChildren(
+					...msgs.map((m) => {
+						const li = document.createElement("li");
+						li.dataset.kind = "history";
+						const time = document.createElement("span");
+						time.className = "time";
+						time.textContent = timeLabel(m.sentAt);
+						const from = document.createElement("span");
+						from.className = "from";
+						from.textContent = m.from;
+						const subj = document.createElement("span");
+						subj.className = "subject";
+						subj.textContent = m.subject;
+						li.append(time, from, subj);
+						return li;
+					}),
+				);
+			}
+
+			async function loadChannelDetail(channelId) {
+				try {
+					const res = await fetch("/api/channel_detail", {
+						method: "POST",
+						headers: { "Content-Type": "application/json" },
+						body: JSON.stringify({ channelId }),
+					});
+					const json = await res.json();
+					if (!json?.success) return;
+					if (!isDetailMode() || selectedContext.channelId !== channelId) return;
+					channelDetail = json.data?.channel ?? null;
+					renderDetailHeader();
+					renderDetailSubscribers();
+				} catch {
+					// 무시: placeholder 잔존, SSE 보강 가능
+				}
+			}
+
+			async function loadChannelHistory(channelId) {
+				try {
+					const res = await fetch("/api/channel_history", {
+						method: "POST",
+						headers: { "Content-Type": "application/json" },
+						body: JSON.stringify({ channelId, limit: HISTORY_LIMIT }),
+					});
+					const json = await res.json();
+					if (!json?.success) return;
+					if (!isDetailMode() || selectedContext.channelId !== channelId) return;
+					channelHistory = json.data?.messages ?? [];
+					renderDetailHistory();
+				} catch {
+					// 무시
+				}
+			}
+
+			function scheduleHistoryRefresh() {
+				if (historyRefreshTimer) clearTimeout(historyRefreshTimer);
+				const channelId = selectedContext.channelId;
+				historyRefreshTimer = setTimeout(() => {
+					historyRefreshTimer = null;
+					if (isDetailMode() && selectedContext.channelId === channelId) {
+						loadChannelHistory(channelId);
+					}
+				}, HISTORY_REFRESH_DEBOUNCE_MS);
+			}
+
 			function onTreeRowClick(ctx) {
-				selectedContext = sameContext(selectedContext, ctx)
-					? { type: "all" }
-					: ctx;
+				const next = sameContext(selectedContext, ctx) ? { type: "all" } : ctx;
+				const wasDetail = isDetailMode();
+				const willBeDetail = next.type === "channel";
+				selectedContext = next;
 				renderTreeSelection();
 				renderAgents();
 				renderChannels();
-				renderFlowHeader();
-				rerenderFlowWithCurrentFilter();
+				if (willBeDetail) {
+					enterChannelDetail(next.channelId);
+					loadChannelDetail(next.channelId);
+					loadChannelHistory(next.channelId);
+				} else {
+					if (wasDetail) exitChannelDetail();
+					renderFlowHeader();
+					rerenderFlowWithCurrentFilter();
+				}
 			}
 
 			treeAllEl.addEventListener("click", () =>
@@ -726,16 +979,72 @@
 					const data = JSON.parse(e.data);
 					applyChannelSubscribed(data.channelId);
 					pushFlowMaybe(data);
+					if (
+						isDetailMode() &&
+						data.channelId === selectedContext.channelId &&
+						channelDetail
+					) {
+						const exists = channelDetail.subscribers.some(
+							(s) => s.topicId === data.topicId,
+						);
+						if (!exists) {
+							channelDetail = {
+								...channelDetail,
+								subscribers: [
+									...channelDetail.subscribers,
+									{
+										topicId: data.topicId,
+										subscribedAt: data.at ?? new Date().toISOString(),
+										queueDepth: 0,
+										lastReadAt: null,
+									},
+								],
+							};
+							renderDetailHeader();
+							renderDetailSubscribers();
+						}
+					}
 				});
 				es.addEventListener("channel_unsubscribed", (e) => {
 					const data = JSON.parse(e.data);
 					applyChannelUnsubscribed(data.channelId);
 					pushFlowMaybe(data);
+					if (
+						isDetailMode() &&
+						data.channelId === selectedContext.channelId &&
+						channelDetail
+					) {
+						channelDetail = {
+							...channelDetail,
+							subscribers: channelDetail.subscribers.filter(
+								(s) => s.topicId !== data.topicId,
+							),
+						};
+						renderDetailHeader();
+						renderDetailSubscribers();
+					}
 				});
 				es.addEventListener("channel_message_published", (e) => {
 					const data = JSON.parse(e.data);
 					applyChannelPublished(data.channelId, data.sentAt);
 					pushFlowMaybe(data);
+					if (
+						isDetailMode() &&
+						data.channelId === selectedContext.channelId &&
+						channelDetail
+					) {
+						const delivered = data.deliveredTo ?? [];
+						channelDetail = {
+							...channelDetail,
+							subscribers: channelDetail.subscribers.map((s) =>
+								delivered.includes(s.topicId)
+									? { ...s, queueDepth: s.queueDepth + 1 }
+									: s,
+							),
+						};
+						renderDetailSubscribers();
+						scheduleHistoryRefresh();
+					}
 				});
 				es.addEventListener("heartbeat", () => {});
 			}
