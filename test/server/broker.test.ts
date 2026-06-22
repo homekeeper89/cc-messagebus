@@ -527,4 +527,134 @@ describe("broker", () => {
 			]);
 		});
 	});
+
+	describe("channel_detail", () => {
+		test("channelDetail_should_throw_CHANNEL_NOT_FOUND_when_channel_missing", () => {
+			assert.throws(
+				() => broker.channelDetail({ channelId: "ghost" }),
+				(e: unknown) =>
+					e instanceof BrokerError && e.code === "CHANNEL_NOT_FOUND",
+			);
+		});
+
+		test("channelDetail_should_return_empty_subscribers_when_none_subscribed", () => {
+			broker.register({ topicId: "alice" });
+			broker.channelCreate({ channelId: "empty", createdBy: "alice" });
+			const res = broker.channelDetail({ channelId: "empty" });
+			assert.equal(res.channel.channelId, "empty");
+			assert.equal(res.channel.createdBy, "alice");
+			assert.deepEqual(res.channel.subscribers, []);
+		});
+
+		test("channelDetail_should_list_subscribers_ordered_by_subscribed_at_ASC", () => {
+			let now = "2026-06-20T00:00:00.000Z";
+			db.close();
+			rmSync(dbPath, { force: true });
+			db = openDatabase(dbPath);
+			const mutableBroker = createBroker(db, {
+				visibilityTimeoutSec: 30,
+				ttlDays: 30,
+				dashboardUrl: "http://localhost:5959",
+				clock: () => now,
+			});
+
+			mutableBroker.register({ topicId: "alice" });
+			mutableBroker.register({ topicId: "bob" });
+			mutableBroker.register({ topicId: "carol" });
+			mutableBroker.channelCreate({ channelId: "ch1", createdBy: "alice" });
+
+			now = "2026-06-20T00:00:01.000Z";
+			mutableBroker.channelSubscribe({ channelId: "ch1", topicId: "bob" });
+			now = "2026-06-20T00:00:02.000Z";
+			mutableBroker.channelSubscribe({ channelId: "ch1", topicId: "carol" });
+
+			const res = mutableBroker.channelDetail({ channelId: "ch1" });
+			const ids = res.channel.subscribers.map((s) => s.topicId);
+			assert.deepEqual(ids, ["bob", "carol"]);
+		});
+
+		test("channelDetail_should_compute_queueDepth_and_lastReadAt_per_subscriber", () => {
+			let now = "2026-06-20T00:00:00.000Z";
+			db.close();
+			rmSync(dbPath, { force: true });
+			db = openDatabase(dbPath);
+			const mutableBroker = createBroker(db, {
+				visibilityTimeoutSec: 30,
+				ttlDays: 30,
+				dashboardUrl: "http://localhost:5959",
+				clock: () => now,
+			});
+
+			mutableBroker.register({ topicId: "alice" });
+			mutableBroker.register({ topicId: "bob" });
+			mutableBroker.register({ topicId: "carol" });
+			mutableBroker.channelCreate({ channelId: "ch1", createdBy: "alice" });
+			mutableBroker.channelSubscribe({ channelId: "ch1", topicId: "bob" });
+			mutableBroker.channelSubscribe({ channelId: "ch1", topicId: "carol" });
+
+			now = "2026-06-20T00:00:10.000Z";
+			mutableBroker.channelSend({
+				channelId: "ch1",
+				from: "alice",
+				subject: "m1",
+				body: "b1",
+			});
+			now = "2026-06-20T00:00:11.000Z";
+			mutableBroker.channelSend({
+				channelId: "ch1",
+				from: "alice",
+				subject: "m2",
+				body: "b2",
+			});
+
+			// bob: reads and acks m1 only — queueDepth=1, lastReadAt = ack time of m1
+			now = "2026-06-20T00:00:20.000Z";
+			const bobMsgs = mutableBroker.read({ topicId: "bob" }).messages;
+			const bobM1 = bobMsgs.find((m) => m.subject === "m1");
+			assert.ok(bobM1);
+			now = "2026-06-20T00:00:21.000Z";
+			mutableBroker.ack({ topicId: "bob", messageId: bobM1.id });
+
+			// carol: no acks — queueDepth=2, lastReadAt=null
+			const res = mutableBroker.channelDetail({ channelId: "ch1" });
+			const bob = res.channel.subscribers.find((s) => s.topicId === "bob");
+			const carol = res.channel.subscribers.find((s) => s.topicId === "carol");
+			assert.ok(bob);
+			assert.ok(carol);
+			assert.equal(bob.queueDepth, 1);
+			assert.equal(bob.lastReadAt, "2026-06-20T00:00:21.000Z");
+			assert.equal(carol.queueDepth, 2);
+			assert.equal(carol.lastReadAt, null);
+		});
+
+		test("channelDetail_should_handle_many_subscribers_in_single_query", () => {
+			broker.register({ topicId: "alice" });
+			broker.channelCreate({ channelId: "wide", createdBy: "alice" });
+			const subscribers = Array.from({ length: 50 }, (_, i) => `peer-${i}`);
+			for (const t of subscribers) {
+				broker.register({ topicId: t });
+				broker.channelSubscribe({ channelId: "wide", topicId: t });
+			}
+			const res = broker.channelDetail({ channelId: "wide" });
+			assert.equal(res.channel.subscribers.length, 50);
+			for (const s of res.channel.subscribers) {
+				assert.equal(s.queueDepth, 0);
+				assert.equal(s.lastReadAt, null);
+			}
+		});
+
+		test("channelDetail_should_only_count_channel_origin_messages_not_direct_sends", () => {
+			broker.register({ topicId: "alice" });
+			broker.register({ topicId: "bob" });
+			broker.channelCreate({ channelId: "ch1", createdBy: "alice" });
+			broker.channelSubscribe({ channelId: "ch1", topicId: "bob" });
+			// direct send (not channel) — must NOT count toward queueDepth
+			broker.send({ from: "alice", to: "bob", subject: "direct", body: "d" });
+
+			const res = broker.channelDetail({ channelId: "ch1" });
+			const bob = res.channel.subscribers.find((s) => s.topicId === "bob");
+			assert.ok(bob);
+			assert.equal(bob.queueDepth, 0);
+		});
+	});
 });

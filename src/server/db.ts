@@ -132,6 +132,18 @@ export interface ChannelMessageRow {
 	sent_at: string;
 }
 
+export interface ChannelDetailRow {
+	channelId: string;
+	createdBy: TopicId;
+	createdAt: IsoTimestamp;
+	subscribers: Array<{
+		topicId: TopicId;
+		subscribedAt: IsoTimestamp;
+		queueDepth: number;
+		lastReadAt: IsoTimestamp | null;
+	}>;
+}
+
 function rowToPeer(row: SessionRow, queueLength: number): PeerDto {
 	return {
 		topicId: row.topic_id,
@@ -326,6 +338,28 @@ export function openDatabase(dbPath: string) {
 		 GROUP BY c.id
 		 ORDER BY MAX(cm.sent_at) DESC NULLS LAST, c.created_at ASC`,
 	);
+	const stmtListChannelSubscribersWithStats = db.prepare<
+		[string],
+		{
+			subscriber_topic_id: string;
+			subscribed_at: string;
+			queue_depth: number;
+			last_read_at: string | null;
+		}
+	>(
+		`SELECT s.subscriber_topic_id,
+		        s.subscribed_at,
+		        COALESCE(SUM(CASE WHEN m.channel_message_id IS NOT NULL AND m.acked_at IS NULL THEN 1 ELSE 0 END), 0) AS queue_depth,
+		        MAX(CASE WHEN m.channel_message_id IS NOT NULL THEN m.acked_at END) AS last_read_at
+		 FROM channel_subscriptions s
+		 LEFT JOIN channel_messages cm ON cm.channel_id = s.channel_id
+		 LEFT JOIN messages m
+		        ON m.channel_message_id = cm.id
+		       AND m.to_topic = s.subscriber_topic_id
+		 WHERE s.channel_id = ?
+		 GROUP BY s.subscriber_topic_id, s.subscribed_at
+		 ORDER BY s.subscribed_at ASC, s.subscriber_topic_id ASC`,
+	);
 	const stmtInsertChannelMessage = db.prepare<
 		[string, string, string, string, string, string]
 	>(
@@ -517,6 +551,23 @@ export function openDatabase(dbPath: string) {
 			: stmtListChannelHistoryBefore.all(channelId, beforeSentAt, limit + 1);
 	}
 
+	function fetchChannelDetail(channelId: string): ChannelDetailRow {
+		const channel = stmtGetChannel.get(channelId);
+		if (!channel) throw new DbError("CHANNEL_NOT_FOUND");
+		const rows = stmtListChannelSubscribersWithStats.all(channelId);
+		return {
+			channelId: channel.id,
+			createdBy: channel.created_by,
+			createdAt: channel.created_at,
+			subscribers: rows.map((r) => ({
+				topicId: r.subscriber_topic_id,
+				subscribedAt: r.subscribed_at,
+				queueDepth: r.queue_depth,
+				lastReadAt: r.last_read_at,
+			})),
+		};
+	}
+
 	function listChannelSummaries(): ChannelSummaryDto[] {
 		const rows = stmtListChannelSummaries.all();
 		return rows.map((r) => ({
@@ -596,6 +647,7 @@ export function openDatabase(dbPath: string) {
 		unsubscribeChannel: (channelId: string, subscriberTopicId: TopicId) =>
 			unsubscribeChannelTx(channelId, subscriberTopicId),
 		fetchChannelHistory,
+		fetchChannelDetail,
 		listChannelSubscribers,
 		listChannelSummaries,
 		channelSend: (input: ChannelSendInput) => channelSendTx(input),
