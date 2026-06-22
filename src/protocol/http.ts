@@ -49,6 +49,20 @@ export interface ChannelSummaryDto {
 	lastPublishedAt: IsoTimestamp | null;
 }
 
+export interface SubscriberDto {
+	topicId: TopicId;
+	subscribedAt: IsoTimestamp;
+	queueDepth: number;
+	lastReadAt: IsoTimestamp | null;
+}
+
+export interface ChannelDetailDto {
+	channelId: ChannelId;
+	createdBy: TopicId;
+	createdAt: IsoTimestamp;
+	subscribers: SubscriberDto[];
+}
+
 export interface ChannelMessageDto {
 	channelMessageId: ChannelMessageId;
 	channelId: ChannelId;
@@ -72,6 +86,7 @@ export const HTTP_ENDPOINTS = {
 	channelSend: { method: "POST", path: "/api/channel_send" },
 	channelUnsubscribe: { method: "POST", path: "/api/channel_unsubscribe" },
 	channelHistory: { method: "POST", path: "/api/channel_history" },
+	channelDetail: { method: "POST", path: "/api/channel_detail" },
 } as const;
 
 export interface RegisterRequest {
@@ -175,6 +190,13 @@ export interface ChannelHistoryResponse {
 	hasMore: boolean;
 }
 
+export interface ChannelDetailRequest {
+	channelId: ChannelId;
+}
+export interface ChannelDetailResponse {
+	channel: ChannelDetailDto;
+}
+
 export type RegisterApiResponse = ApiResponse<RegisterResponse>;
 export type UnregisterApiResponse = ApiResponse<UnregisterResponse>;
 export type SendApiResponse = ApiResponse<SendResponse>;
@@ -188,3 +210,4 @@ export type ChannelSendApiResponse = ApiResponse<ChannelSendResponse>;
 export type ChannelUnsubscribeApiResponse =
 	ApiResponse<ChannelUnsubscribeResponse>;
 export type ChannelHistoryApiResponse = ApiResponse<ChannelHistoryResponse>;
+export type ChannelDetailApiResponse = ApiResponse<ChannelDetailResponse>;

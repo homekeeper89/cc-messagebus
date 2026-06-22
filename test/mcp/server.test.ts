@@ -36,6 +36,7 @@ interface CallLog {
 		limit?: number;
 		beforeSentAt?: string;
 	}[];
+	channelDetail: { channelId: string }[];
 }
 
 function makeMockClient(overrides: Partial<BrokerClient> = {}): {
@@ -55,6 +56,7 @@ function makeMockClient(overrides: Partial<BrokerClient> = {}): {
 		channelSend: [],
 		channelUnsubscribe: [],
 		channelHistory: [],
+		channelDetail: [],
 	};
 	const client: BrokerClient = {
 		register: async (req) => {
@@ -119,6 +121,17 @@ function makeMockClient(overrides: Partial<BrokerClient> = {}): {
 			calls.channelHistory.push(req);
 			return { messages: [], hasMore: false };
 		},
+		channelDetail: async (req) => {
+			calls.channelDetail.push(req);
+			return {
+				channel: {
+					channelId: req.channelId,
+					createdBy: "alice",
+					createdAt: "2026-06-18T00:00:00.000Z",
+					subscribers: [],
+				},
+			};
+		},
 		...overrides,
 	};
 	return { client, calls };
@@ -129,7 +142,7 @@ const noopSpawn: SpawnCmd = { exe: "/bin/true", args: [] };
 describe("mcp/server.buildToolList", () => {
 	it("returns all tools matching protocol/mcp.ts", () => {
 		const tools = buildToolList();
-		assert.equal(tools.length, 12);
+		assert.equal(tools.length, 13);
 		const keys = Object.keys(MCP_TOOL_NAMES) as McpToolKey[];
 		for (const key of keys) {
 			const found = tools.find((t) => t.name === MCP_TOOL_NAMES[key]);
@@ -334,6 +347,16 @@ describe("mcp/server.dispatch", () => {
 			limit: 10,
 			beforeSentAt: "2026-06-19T00:00:00.000Z",
 		});
+	});
+
+	it("channel_detail does not require register and forwards channelId", async () => {
+		const { client, calls } = makeMockClient();
+		const res = (await dispatch(client, noopSpawn, "channel_detail", {
+			channelId: "general",
+		})) as { channel: { channelId: string; subscribers: unknown[] } };
+		assert.equal(calls.channelDetail.length, 1);
+		assert.deepEqual(calls.channelDetail[0], { channelId: "general" });
+		assert.equal(res.channel.channelId, "general");
 	});
 
 	it("unknown tool throws UNKNOWN_TOOL", async () => {
