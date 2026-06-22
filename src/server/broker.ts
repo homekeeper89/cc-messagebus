@@ -6,6 +6,8 @@ import type {
 	AckResponse,
 	ChannelCreateRequest,
 	ChannelCreateResponse,
+	ChannelDetailRequest,
+	ChannelDetailResponse,
 	ChannelDto,
 	ChannelHistoryRequest,
 	ChannelHistoryResponse,
@@ -70,6 +72,7 @@ export interface Broker {
 		req: ChannelUnsubscribeRequest,
 	) => ChannelUnsubscribeResponse;
 	channelHistory: (req: ChannelHistoryRequest) => ChannelHistoryResponse;
+	channelDetail: (req: ChannelDetailRequest) => ChannelDetailResponse;
 }
 
 const HISTORY_LIMIT_DEFAULT = 50;
@@ -475,6 +478,24 @@ export function createBroker(db: CcDatabase, opts: BrokerOptions): Broker {
 		return { messages, hasMore };
 	}
 
+	// PRD `channels.prd.md` "What We're NOT Building": ACL 없음 — 누구나 read 가능.
+	// `requireTopicId` 없이 anonymous 호출 허용은 의도된 정책.
+	function channelDetail(req: ChannelDetailRequest): ChannelDetailResponse {
+		let detail: ReturnType<typeof db.fetchChannelDetail>;
+		try {
+			detail = db.fetchChannelDetail(req.channelId);
+		} catch (e) {
+			if (e instanceof DbError && e.code === "CHANNEL_NOT_FOUND") {
+				throw new BrokerError(
+					"CHANNEL_NOT_FOUND",
+					`channel '${req.channelId}' not found`,
+				);
+			}
+			throw e;
+		}
+		return { channel: detail };
+	}
+
 	return {
 		events,
 		register,
@@ -490,5 +511,6 @@ export function createBroker(db: CcDatabase, opts: BrokerOptions): Broker {
 		channelSend,
 		channelUnsubscribe,
 		channelHistory,
+		channelDetail,
 	};
 }

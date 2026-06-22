@@ -4,6 +4,8 @@ import {
 	type AckResponse,
 	type ChannelCreateRequest,
 	type ChannelCreateResponse,
+	type ChannelDetailRequest,
+	type ChannelDetailResponse,
 	type ChannelHistoryRequest,
 	type ChannelHistoryResponse,
 	type ChannelSendRequest,
@@ -55,6 +57,7 @@ export interface BrokerClient {
 	channelHistory: (
 		req: ChannelHistoryRequest,
 	) => Promise<ChannelHistoryResponse>;
+	channelDetail: (req: ChannelDetailRequest) => Promise<ChannelDetailResponse>;
 }
 
 export function createBrokerClient(baseUrl: string): BrokerClient {
@@ -143,6 +146,11 @@ export function createBrokerClient(baseUrl: string): BrokerClient {
 		channelHistory: (req) =>
 			call<ChannelHistoryRequest, ChannelHistoryResponse>(
 				HTTP_ENDPOINTS.channelHistory.path,
+				req,
+			),
+		channelDetail: (req) =>
+			call<ChannelDetailRequest, ChannelDetailResponse>(
+				HTTP_ENDPOINTS.channelDetail.path,
 				req,
 			),
 	};

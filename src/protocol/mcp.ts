@@ -1,6 +1,7 @@
 import type {
 	AckResponse,
 	ChannelCreateResponse,
+	ChannelDetailResponse,
 	ChannelHistoryResponse,
 	ChannelId,
 	ChannelSendResponse,
@@ -31,6 +32,7 @@ export const MCP_TOOL_NAMES = {
 	channelSend: "channel_send",
 	channelUnsubscribe: "channel_unsubscribe",
 	channelHistory: "channel_history",
+	channelDetail: "channel_detail",
 } as const;
 
 export type McpToolKey = keyof typeof MCP_TOOL_NAMES;
@@ -102,6 +104,11 @@ export interface ChannelHistoryToolInput {
 }
 export type ChannelHistoryToolOutput = ChannelHistoryResponse;
 
+export interface ChannelDetailToolInput {
+	channelId: ChannelId;
+}
+export type ChannelDetailToolOutput = ChannelDetailResponse;
+
 // WARNING: The `register` description AND the `channel_subscribe`
 // description below are wire-critical. The register flow relies on
 // Claude auto-invoking Monitor; the channel_subscribe flow relies on
@@ -129,6 +136,8 @@ export const MCP_TOOL_DESCRIPTIONS: Record<McpToolKey, string> = {
 		"Unsubscribe the current session's topicId from a channel. Already-delivered messages in the inbox are preserved (still ackable). Returns NOT_SUBSCRIBED if no active subscription.",
 	channelHistory:
 		"Pull past canonical messages of a channel for late-joining context. Returns up to `limit` messages (default broker-decided) ordered by sentAt desc. Use `beforeSentAt` as a cursor for pagination.",
+	channelDetail:
+		"Inspect a channel's subscribers with per-subscriber queue stats (queueDepth, lastReadAt). No ACL — any session can read. Returns CHANNEL_NOT_FOUND if the channelId does not exist.",
 };
 
 export type JsonSchema = Record<string, unknown>;
@@ -215,6 +224,12 @@ export const MCP_INPUT_SCHEMAS: Record<McpToolKey, JsonSchema> = {
 			limit: { type: "integer", minimum: 1, maximum: 200 },
 			beforeSentAt: { type: "string", minLength: 1, maxLength: 64 },
 		},
+		required: ["channelId"],
+		additionalProperties: false,
+	},
+	channelDetail: {
+		type: "object",
+		properties: { channelId: CHANNEL_ID_SCHEMA },
 		required: ["channelId"],
 		additionalProperties: false,
 	},
