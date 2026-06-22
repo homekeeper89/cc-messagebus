@@ -1,6 +1,6 @@
 {
 	"name": "cc-messagebus",
-	"version": "0.0.1",
+	"version": "0.1.0",
 	"description": "Cross-session message bus for Claude Code with central observability",
 	"type": "module",
 	"bin": {
