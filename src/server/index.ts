@@ -6,6 +6,7 @@ import { type ErrorCode, errorCodeToHttpStatus } from "../protocol/errors.js";
 import {
 	type AckRequest,
 	type ChannelCreateRequest,
+	type ChannelDetailRequest,
 	type ChannelHistoryRequest,
 	type ChannelSendRequest,
 	type ChannelSubscribeRequest,
@@ -156,6 +157,12 @@ const CHANNEL_HISTORY_BODY = {
 	required: ["channelId"],
 	additionalProperties: false,
 };
+const CHANNEL_DETAIL_BODY = {
+	type: "object",
+	properties: { channelId: CHANNEL_ID_SCHEMA },
+	required: ["channelId"],
+	additionalProperties: false,
+};
 
 export interface ServerOptions {
 	host?: string;
@@ -273,6 +280,12 @@ export function createServer(opts: ServerOptions): Server {
 		HTTP_ENDPOINTS.channelHistory.path,
 		{ schema: { body: CHANNEL_HISTORY_BODY } },
 		async (req) => ({ ok: true, ...broker.channelHistory(req.body) }),
+	);
+
+	app.post<{ Body: ChannelDetailRequest }>(
+		HTTP_ENDPOINTS.channelDetail.path,
+		{ schema: { body: CHANNEL_DETAIL_BODY } },
+		async (req) => ({ ok: true, ...broker.channelDetail(req.body) }),
 	);
 
 	app.get<{ Params: { topicId: string } }>(

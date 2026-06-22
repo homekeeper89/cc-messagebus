@@ -135,6 +135,12 @@ export async function dispatch(
 				beforeSentAt: args.beforeSentAt as string | undefined,
 			});
 		}
+		case MCP_TOOL_NAMES.channelDetail: {
+			// PRD: ACL 없음 — 누구나 read 가능. requireTopicId 의도적으로 호출 안 함.
+			return client.channelDetail({
+				channelId: args.channelId as string,
+			});
+		}
 		default:
 			throw new McpClientError("UNKNOWN_TOOL", `unknown tool: ${name}`);
 	}
