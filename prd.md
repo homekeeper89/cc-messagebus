@@ -41,7 +41,7 @@
 
 ```
 User: "saturn으로 등록"
-Claude: register({ topicId: "saturn" })
+Claude: register({ peerId: "saturn" })
         ↓ (MCP 내부) bus daemon 자동 spawn → register → 응답
 Claude: Monitor({ command: "cc-messagebus tail saturn" })  ← 자동 호출
 Claude: "saturn으로 등록 완료. 대시보드: http://localhost:5959"
@@ -69,18 +69,18 @@ Claude: "saturn으로 등록 완료. 대시보드: http://localhost:5959"
 
 | 도구 | 시그니처 | 동작 |
 |------|---------|------|
-| `register` | `{ topicId: string }` | 신규 등록. **중복 시 무조건 409 거부** |
-| `unregister` | `{ purgeQueue?: boolean }` | 본인 topic 제거. `purgeQueue` default `false` (큐 보존, 재등록 시 backlog 받음) |
+| `register` | `{ peerId: string }` | 신규 등록. **중복 시 무조건 409 거부** |
+| `unregister` | `{ purgeQueue?: boolean }` | 본인 peer 제거. `purgeQueue` default `false` (큐 보존, 재등록 시 backlog 받음) |
 | `send` | `{ to, subject, body, threadId? }` | 메시지 전송. target offline이어도 큐 적재 |
 | `read` | `{ max?: number }` | 미수신 메시지 가져옴. **자동 ack 없음** (in-flight 상태로 마킹) |
 | `ack` | `{ messageId: string }` | 명시적 ack. 호출 전까지 in-flight 유지 |
-| `list_peers` | `{}` | 등록된 topic 목록 + 상태 |
+| `list_peers` | `{}` | 등록된 peer 목록 + 상태 |
 
 #### register 응답 형식
 ```json
 {
   "ok": true,
-  "topicId": "saturn",
+  "peerId": "saturn",
   "monitorCommand": "cc-messagebus tail saturn",
   "dashboardUrl": "http://localhost:5959"
 }
@@ -94,16 +94,16 @@ MCP register 도구의 description에 *"register 성공 후 반드시 `monitorCo
 |--------|------|
 | `cc-messagebus serve` | broker daemon. 명시적 실행 가능, MCP가 자동 spawn하기도 함 |
 | `cc-messagebus mcp` | MCP stdio adapter. Claude Code가 spawn |
-| `cc-messagebus tail <topicId>` | 구독 → stdout에 line-buffered 출력 (Monitor용) |
+| `cc-messagebus tail <peerId>` | 구독 → stdout에 line-buffered 출력 (Monitor용) |
 | `cc-messagebus dashboard` | 브라우저 자동 오픈 |
-| `cc-messagebus status` | daemon 살아있는지, 등록 topic 목록, 큐 길이 표시 |
+| `cc-messagebus status` | daemon 살아있는지, 등록 peer 목록, 큐 길이 표시 |
 | `cc-messagebus stop` | daemon 종료 |
 
 ### 3.3. Dashboard
 
 단일 페이지 웹 UI. 다음을 실시간 표시:
 
-- **Registered Sessions**: topicId, 접속 시각, 마지막 활동, 큐 길이, 상태(connected/disconnected)
+- **Registered Sessions**: peerId, 접속 시각, 마지막 활동, 큐 길이, 상태(connected/disconnected)
 - **Message Flow (live)**: 시각 / from → to / subject / threadId
   - SSE로 실시간 stream
   - 필터: from, to, 검색어
@@ -129,7 +129,7 @@ MCP register 도구의 description에 *"register 성공 후 반드시 `monitorCo
 
 ### 5.1. 중복 등록
 **무조건 거부 (HTTP 409 의미론).** takeover 패턴 미지원.  
-이미 같은 topicId가 등록되어 있으면 새 register는 명확한 에러로 실패.
+이미 같은 peerId가 등록되어 있으면 새 register는 명확한 에러로 실패.
 
 ### 5.2. ack / Redelivery
 - `read()`로 가져온 메시지 → `in_flight` 상태로 마킹, `in_flight_until = now + visibility_timeout`
@@ -145,9 +145,9 @@ MCP register 도구의 description에 *"register 성공 후 반드시 `monitorCo
 - `unregister({ purgeQueue: true })`로 본인 큐만 즉시 삭제 가능
 
 ### 5.4. 세션 disconnect 시 큐 처리
-- 해당 topic의 `tail` SSE 연결이 close되면 상태를 `disconnected`로 마킹
+- 해당 peer의 `tail` SSE 연결이 close되면 상태를 `disconnected`로 마킹
 - 큐는 보존 (default `purgeQueue: false` 정책과 일치)
-- 동일 topicId로 재등록 시 backlog 자동 전달
+- 동일 peerId로 재등록 시 backlog 자동 전달
 
 ### 5.5. 인증
 - v1: 인증 없음
@@ -161,7 +161,7 @@ MCP register 도구의 description에 *"register 성공 후 반드시 `monitorCo
 
 - 인증/인가, TLS
 - 메시지 암호화
-- broadcast / fan-out (1:1만 지원) — channels (multi-subscriber pub-sub) 로 해제됨. 자세한 사항은 [.claude/PRPs/prds/channels.prd.md](.claude/PRPs/prds/channels.prd.md) 참조
+- broadcast / fan-out (1:1만 지원) — topics (multi-subscriber pub-sub) 로 해제됨. 자세한 사항은 [.claude/PRPs/prds/channels.prd.md](.claude/PRPs/prds/channels.prd.md) 참조
 - 메시지 priority, scheduling
 - 파일 첨부
 - 메트릭 외부 통합 (Prometheus 등)
@@ -176,7 +176,7 @@ SQLite 기반. 단일 파일 (`~/.cc-messagebus/data.db`).
 ### sessions
 | 컬럼 | 타입 | 설명 |
 |------|------|------|
-| topic_id | TEXT PK | 유니크 topic ID |
+| peer_id | TEXT PK | 유니크 peer ID |
 | connected_at | TEXT | 최초 등록 시각 |
 | last_seen_at | TEXT | 마지막 활동 시각 |
 | status | TEXT | `connected` / `disconnected` |
@@ -185,8 +185,8 @@ SQLite 기반. 단일 파일 (`~/.cc-messagebus/data.db`).
 | 컬럼 | 타입 | 설명 |
 |------|------|------|
 | id | TEXT PK | UUID |
-| from_topic | TEXT | 발신 |
-| to_topic | TEXT | 수신 |
+| from_peer_id | TEXT | 발신 |
+| to_peer_id | TEXT | 수신 |
 | subject | TEXT | 제목 |
 | body | TEXT | 본문 |
 | thread_id | TEXT NULL | 스레드 식별자 |
@@ -196,7 +196,7 @@ SQLite 기반. 단일 파일 (`~/.cc-messagebus/data.db`).
 | expires_at | TEXT | TTL 만료 시각 (cleanup 대상 판정용) |
 
 인덱스:
-- `(to_topic, acked_at, in_flight_until)` — deliverable 메시지 빠른 조회
+- `(to_peer_id, acked_at, in_flight_until)` — deliverable 메시지 빠른 조회
 - `(expires_at)` — TTL cleanup용
 
 ---
@@ -209,7 +209,7 @@ SQLite 기반. 단일 파일 (`~/.cc-messagebus/data.db`).
 │                                                           │
 │  - Fastify HTTP server                                  │
 │  - HTTP RPC /api/* (MCP 클라이언트 register/send/...)   │
-│  - SSE /tail/:topicId (수신 알림 push, tail이 구독)     │
+│  - SSE /tail/:peerId (수신 알림 push, tail이 구독)      │
 │  - SSE /events (dashboard 라이브 업데이트)              │
 │  - HTTP /dashboard (단일 페이지 UI)                     │
 │  - SQLite (better-sqlite3)                              │
