@@ -2,21 +2,22 @@ import { mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 import Database from "better-sqlite3";
 import type {
-	ChannelSummaryDto,
 	IsoTimestamp,
 	MessageDto,
 	MessageId,
 	PeerDto,
+	PeerId,
 	TopicId,
+	TopicSummaryDto,
 } from "../protocol/http.js";
 import { SessionStatus } from "../protocol/http.js";
 
 export type DbErrorCode =
-	| "TOPIC_ALREADY_REGISTERED"
+	| "PEER_ALREADY_REGISTERED"
 	| "MESSAGE_NOT_FOUND"
 	| "MESSAGE_NOT_IN_FLIGHT"
-	| "CHANNEL_NOT_FOUND"
-	| "CHANNEL_ALREADY_EXISTS"
+	| "TOPIC_NOT_FOUND"
+	| "TOPIC_ALREADY_EXISTS"
 	| "ALREADY_SUBSCRIBED"
 	| "NOT_SUBSCRIBED";
 
@@ -27,65 +28,86 @@ export class DbError extends Error {
 	}
 }
 
-const MIGRATION = `
+const SCHEMA_DDL = `
 CREATE TABLE IF NOT EXISTS sessions (
-	topic_id TEXT PRIMARY KEY,
+	peer_id TEXT PRIMARY KEY,
 	connected_at TEXT NOT NULL,
 	last_seen_at TEXT NOT NULL,
 	status TEXT NOT NULL,
 	last_activity_at TEXT
 );
 
+CREATE TABLE IF NOT EXISTS topics (
+	id TEXT PRIMARY KEY,
+	created_at TEXT NOT NULL,
+	created_by TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS topic_subscriptions (
+	topic_id TEXT NOT NULL REFERENCES topics(id) ON DELETE CASCADE,
+	subscriber_peer_id TEXT NOT NULL,
+	subscribed_at TEXT NOT NULL,
+	PRIMARY KEY (topic_id, subscriber_peer_id)
+);
+
+CREATE TABLE IF NOT EXISTS topic_messages (
+	id TEXT PRIMARY KEY,
+	topic_id TEXT NOT NULL REFERENCES topics(id) ON DELETE CASCADE,
+	from_peer_id TEXT NOT NULL,
+	subject TEXT NOT NULL,
+	body TEXT NOT NULL,
+	sent_at TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS messages (
 	id TEXT PRIMARY KEY,
-	from_topic TEXT NOT NULL,
-	to_topic TEXT NOT NULL,
+	from_peer TEXT NOT NULL,
+	to_peer TEXT NOT NULL,
 	subject TEXT NOT NULL,
 	body TEXT NOT NULL,
 	thread_id TEXT,
 	sent_at TEXT NOT NULL,
 	in_flight_until TEXT,
 	acked_at TEXT,
-	expires_at TEXT NOT NULL
+	expires_at TEXT NOT NULL,
+	topic_message_id TEXT REFERENCES topic_messages(id) ON DELETE SET NULL
 );
 
 CREATE INDEX IF NOT EXISTS idx_messages_delivery
-	ON messages (to_topic, acked_at, in_flight_until);
+	ON messages (to_peer, acked_at, in_flight_until);
 
 CREATE INDEX IF NOT EXISTS idx_messages_expires
 	ON messages (expires_at);
 
-CREATE TABLE IF NOT EXISTS channels (
-	id TEXT PRIMARY KEY,
-	created_at TEXT NOT NULL,
-	created_by TEXT NOT NULL
-);
+CREATE INDEX IF NOT EXISTS idx_topic_messages_topic_sent
+	ON topic_messages (topic_id, sent_at);
 
-CREATE TABLE IF NOT EXISTS channel_subscriptions (
-	channel_id TEXT NOT NULL REFERENCES channels(id) ON DELETE CASCADE,
-	subscriber_topic_id TEXT NOT NULL,
-	subscribed_at TEXT NOT NULL,
-	PRIMARY KEY (channel_id, subscriber_topic_id)
-);
+CREATE INDEX IF NOT EXISTS idx_topic_subscriptions_subscriber
+	ON topic_subscriptions (subscriber_peer_id);
+`;
 
-CREATE TABLE IF NOT EXISTS channel_messages (
-	id TEXT PRIMARY KEY,
-	channel_id TEXT NOT NULL REFERENCES channels(id) ON DELETE CASCADE,
-	from_topic_id TEXT NOT NULL,
-	subject TEXT NOT NULL,
-	body TEXT NOT NULL,
-	sent_at TEXT NOT NULL
-);
-
-CREATE INDEX IF NOT EXISTS idx_channel_messages_channel_sent
-	ON channel_messages (channel_id, sent_at);
-
-CREATE INDEX IF NOT EXISTS idx_channel_subscriptions_subscriber
-	ON channel_subscriptions (subscriber_topic_id);
+const MIGRATE_V1_TO_V2_SQL = `
+ALTER TABLE sessions RENAME COLUMN topic_id TO peer_id;
+ALTER TABLE messages RENAME COLUMN from_topic TO from_peer;
+ALTER TABLE messages RENAME COLUMN to_topic TO to_peer;
+ALTER TABLE messages RENAME COLUMN channel_message_id TO topic_message_id;
+ALTER TABLE channels RENAME TO topics;
+ALTER TABLE channel_subscriptions RENAME TO topic_subscriptions;
+ALTER TABLE topic_subscriptions RENAME COLUMN channel_id TO topic_id;
+ALTER TABLE topic_subscriptions RENAME COLUMN subscriber_topic_id TO subscriber_peer_id;
+ALTER TABLE channel_messages RENAME TO topic_messages;
+ALTER TABLE topic_messages RENAME COLUMN channel_id TO topic_id;
+ALTER TABLE topic_messages RENAME COLUMN from_topic_id TO from_peer_id;
+DROP INDEX IF EXISTS idx_channel_messages_channel_sent;
+DROP INDEX IF EXISTS idx_channel_subscriptions_subscriber;
+DROP INDEX IF EXISTS idx_messages_delivery;
+CREATE INDEX IF NOT EXISTS idx_topic_messages_topic_sent ON topic_messages (topic_id, sent_at);
+CREATE INDEX IF NOT EXISTS idx_topic_subscriptions_subscriber ON topic_subscriptions (subscriber_peer_id);
+CREATE INDEX IF NOT EXISTS idx_messages_delivery ON messages (to_peer, acked_at, in_flight_until);
 `;
 
 interface SessionRow {
-	topic_id: string;
+	peer_id: string;
 	connected_at: string;
 	last_seen_at: string;
 	status: string;
@@ -94,8 +116,8 @@ interface SessionRow {
 
 interface MessageRow {
 	id: string;
-	from_topic: string;
-	to_topic: string;
+	from_peer: string;
+	to_peer: string;
 	subject: string;
 	body: string;
 	thread_id: string | null;
@@ -103,19 +125,19 @@ interface MessageRow {
 	in_flight_until: string | null;
 	acked_at: string | null;
 	expires_at: string;
-	channel_message_id: string | null;
+	topic_message_id: string | null;
 }
 
-interface ChannelRow {
+interface TopicRow {
 	id: string;
 	created_at: string;
 	created_by: string;
 }
 
-export interface ChannelSendInput {
-	channelMessageId: string;
-	channelId: string;
-	from: TopicId;
+export interface TopicSendInput {
+	topicMessageId: string;
+	topicId: TopicId;
+	from: PeerId;
 	subject: string;
 	body: string;
 	sentAt: IsoTimestamp;
@@ -123,21 +145,21 @@ export interface ChannelSendInput {
 	deliveryMessageIds: string[];
 }
 
-export interface ChannelMessageRow {
+export interface TopicMessageRow {
 	id: string;
-	channel_id: string;
-	from_topic_id: string;
+	topic_id: string;
+	from_peer_id: string;
 	subject: string;
 	body: string;
 	sent_at: string;
 }
 
-export interface ChannelDetailRow {
-	channelId: string;
-	createdBy: TopicId;
+export interface TopicDetailRow {
+	topicId: TopicId;
+	createdBy: PeerId;
 	createdAt: IsoTimestamp;
 	subscribers: Array<{
-		topicId: TopicId;
+		peerId: PeerId;
 		subscribedAt: IsoTimestamp;
 		queueDepth: number;
 		lastReadAt: IsoTimestamp | null;
@@ -146,7 +168,7 @@ export interface ChannelDetailRow {
 
 function rowToPeer(row: SessionRow, queueLength: number): PeerDto {
 	return {
-		topicId: row.topic_id,
+		peerId: row.peer_id,
 		status: row.status as PeerDto["status"],
 		connectedAt: row.connected_at,
 		lastSeenAt: row.last_seen_at,
@@ -158,8 +180,8 @@ function rowToPeer(row: SessionRow, queueLength: number): PeerDto {
 function rowToMessage(row: MessageRow): MessageDto {
 	return {
 		id: row.id,
-		from: row.from_topic,
-		to: row.to_topic,
+		from: row.from_peer,
+		to: row.to_peer,
 		subject: row.subject,
 		body: row.body,
 		threadId: row.thread_id,
@@ -170,63 +192,72 @@ function rowToMessage(row: MessageRow): MessageDto {
 	};
 }
 
+function detectV1(db: Database.Database): boolean {
+	const sessionsCols = db
+		.prepare<[], { name: string }>("PRAGMA table_info(sessions)")
+		.all();
+	if (sessionsCols.length === 0) return false;
+	return sessionsCols.some((c) => c.name === "topic_id");
+}
+
+function migrateV1ToV2(db: Database.Database): void {
+	db.pragma("foreign_keys = OFF");
+	try {
+		const tx = db.transaction(() => {
+			db.exec(MIGRATE_V1_TO_V2_SQL);
+			db.pragma("user_version = 2");
+		});
+		tx();
+	} finally {
+		db.pragma("foreign_keys = ON");
+	}
+}
+
 export function openDatabase(dbPath: string) {
 	mkdirSync(dirname(dbPath), { recursive: true });
 	const db = new Database(dbPath);
 	db.pragma("journal_mode = WAL");
 	db.pragma("foreign_keys = ON");
-	db.exec(MIGRATION);
 
-	const messagesCols = db
-		.prepare<[], { name: string }>("PRAGMA table_info(messages)")
-		.all();
-	const hasChannelMessageId = messagesCols.some(
-		(c) => c.name === "channel_message_id",
-	);
-	if (!hasChannelMessageId) {
-		db.exec(
-			"ALTER TABLE messages ADD COLUMN channel_message_id TEXT REFERENCES channel_messages(id) ON DELETE SET NULL",
-		);
+	if (detectV1(db)) {
+		migrateV1ToV2(db);
 	}
 
-	const sessionsCols = db
-		.prepare<[], { name: string }>("PRAGMA table_info(sessions)")
-		.all();
-	const hasLastActivityAt = sessionsCols.some(
-		(c) => c.name === "last_activity_at",
-	);
-	if (!hasLastActivityAt) {
-		db.exec("ALTER TABLE sessions ADD COLUMN last_activity_at TEXT");
+	db.exec(SCHEMA_DDL);
+
+	const userVersion = db.pragma("user_version", { simple: true }) as number;
+	if (userVersion < 2) {
+		db.pragma("user_version = 2");
 	}
 
 	const stmtGetSession = db.prepare<[string], SessionRow>(
-		"SELECT * FROM sessions WHERE topic_id = ?",
+		"SELECT * FROM sessions WHERE peer_id = ?",
 	);
 	const stmtInsertSession = db.prepare<[string, string, string, string]>(
-		"INSERT INTO sessions (topic_id, connected_at, last_seen_at, status) VALUES (?, ?, ?, ?)",
+		"INSERT INTO sessions (peer_id, connected_at, last_seen_at, status) VALUES (?, ?, ?, ?)",
 	);
 	const stmtReactivateSession = db.prepare<[string, string, string, string]>(
-		"UPDATE sessions SET status = ?, connected_at = ?, last_seen_at = ? WHERE topic_id = ?",
+		"UPDATE sessions SET status = ?, connected_at = ?, last_seen_at = ? WHERE peer_id = ?",
 	);
 	const stmtDeleteSession = db.prepare<[string]>(
-		"DELETE FROM sessions WHERE topic_id = ?",
+		"DELETE FROM sessions WHERE peer_id = ?",
 	);
 	const stmtPurgeQueue = db.prepare<[string]>(
-		"DELETE FROM messages WHERE to_topic = ?",
+		"DELETE FROM messages WHERE to_peer = ?",
 	);
 	const stmtMarkDisconnected = db.prepare<[string, string, string]>(
-		"UPDATE sessions SET status = ?, last_seen_at = ? WHERE topic_id = ?",
+		"UPDATE sessions SET status = ?, last_seen_at = ? WHERE peer_id = ?",
 	);
 	const stmtTouchLastSeen = db.prepare<[string, string]>(
-		"UPDATE sessions SET last_seen_at = ? WHERE topic_id = ?",
+		"UPDATE sessions SET last_seen_at = ? WHERE peer_id = ?",
 	);
 	const stmtUpdateLastActivity = db.prepare<[string, string]>(
-		"UPDATE sessions SET last_activity_at = ? WHERE topic_id = ?",
+		"UPDATE sessions SET last_activity_at = ? WHERE peer_id = ?",
 	);
 	const stmtSelectLastActivity = db.prepare<
 		[string],
 		{ last_activity_at: string | null }
-	>("SELECT last_activity_at FROM sessions WHERE topic_id = ?");
+	>("SELECT last_activity_at FROM sessions WHERE peer_id = ?");
 	const stmtListSessionsWithQueue = db.prepare<
 		[],
 		SessionRow & { queue_length: number }
@@ -234,27 +265,27 @@ export function openDatabase(dbPath: string) {
 		`SELECT s.*, COALESCE(q.cnt, 0) AS queue_length
 		 FROM sessions s
 		 LEFT JOIN (
-		   SELECT to_topic, COUNT(*) AS cnt
+		   SELECT to_peer, COUNT(*) AS cnt
 		   FROM messages
 		   WHERE acked_at IS NULL
-		   GROUP BY to_topic
-		 ) q ON q.to_topic = s.topic_id
+		   GROUP BY to_peer
+		 ) q ON q.to_peer = s.peer_id
 		 ORDER BY s.last_activity_at DESC NULLS LAST, s.connected_at ASC`,
 	);
 	const stmtCountQueue = db.prepare<[string], { c: number }>(
-		"SELECT COUNT(*) AS c FROM messages WHERE to_topic = ? AND acked_at IS NULL",
+		"SELECT COUNT(*) AS c FROM messages WHERE to_peer = ? AND acked_at IS NULL",
 	);
 	const stmtInsertMessage = db.prepare<
 		[string, string, string, string, string, string | null, string, string]
 	>(
-		"INSERT INTO messages (id, from_topic, to_topic, subject, body, thread_id, sent_at, expires_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+		"INSERT INTO messages (id, from_peer, to_peer, subject, body, thread_id, sent_at, expires_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
 	);
 	const stmtSelectDeliverable = db.prepare<
 		[string, string, number],
 		MessageRow
 	>(
 		`SELECT * FROM messages
-		 WHERE to_topic = ?
+		 WHERE to_peer = ?
 		   AND acked_at IS NULL
 		   AND (in_flight_until IS NULL OR in_flight_until <= ?)
 		 ORDER BY sent_at ASC
@@ -264,7 +295,7 @@ export function openDatabase(dbPath: string) {
 		"UPDATE messages SET in_flight_until = ? WHERE id = ?",
 	);
 	const stmtGetMessage = db.prepare<[string, string], MessageRow>(
-		"SELECT * FROM messages WHERE id = ? AND to_topic = ?",
+		"SELECT * FROM messages WHERE id = ? AND to_peer = ?",
 	);
 	const stmtAckMessage = db.prepare<[string, string]>(
 		"UPDATE messages SET acked_at = ?, in_flight_until = NULL WHERE id = ?",
@@ -281,45 +312,40 @@ export function openDatabase(dbPath: string) {
 	const stmtDeleteMessage = db.prepare<[string]>(
 		"DELETE FROM messages WHERE id = ?",
 	);
-	const stmtInsertChannel = db.prepare<[string, string, string]>(
-		"INSERT INTO channels (id, created_at, created_by) VALUES (?, ?, ?)",
+	const stmtInsertTopic = db.prepare<[string, string, string]>(
+		"INSERT INTO topics (id, created_at, created_by) VALUES (?, ?, ?)",
 	);
-	const stmtGetChannel = db.prepare<[string], ChannelRow>(
-		"SELECT * FROM channels WHERE id = ?",
+	const stmtGetTopic = db.prepare<[string], TopicRow>(
+		"SELECT * FROM topics WHERE id = ?",
 	);
-	const stmtInsertChannelSubscription = db.prepare<[string, string, string]>(
-		"INSERT INTO channel_subscriptions (channel_id, subscriber_topic_id, subscribed_at) VALUES (?, ?, ?)",
+	const stmtInsertTopicSubscription = db.prepare<[string, string, string]>(
+		"INSERT INTO topic_subscriptions (topic_id, subscriber_peer_id, subscribed_at) VALUES (?, ?, ?)",
 	);
-	const stmtDeleteChannelSubscription = db.prepare<[string, string]>(
-		"DELETE FROM channel_subscriptions WHERE channel_id = ? AND subscriber_topic_id = ?",
+	const stmtDeleteTopicSubscription = db.prepare<[string, string]>(
+		"DELETE FROM topic_subscriptions WHERE topic_id = ? AND subscriber_peer_id = ?",
 	);
-	const stmtListChannelHistoryAll = db.prepare<
-		[string, number],
-		ChannelMessageRow
-	>(
-		`SELECT id, channel_id, from_topic_id, subject, body, sent_at
-		 FROM channel_messages
-		 WHERE channel_id = ?
+	const stmtListTopicHistoryAll = db.prepare<[string, number], TopicMessageRow>(
+		`SELECT id, topic_id, from_peer_id, subject, body, sent_at
+		 FROM topic_messages
+		 WHERE topic_id = ?
 		 ORDER BY sent_at DESC, id DESC
 		 LIMIT ?`,
 	);
-	const stmtListChannelHistoryBefore = db.prepare<
+	const stmtListTopicHistoryBefore = db.prepare<
 		[string, string, number],
-		ChannelMessageRow
+		TopicMessageRow
 	>(
-		`SELECT id, channel_id, from_topic_id, subject, body, sent_at
-		 FROM channel_messages
-		 WHERE channel_id = ? AND sent_at < ?
+		`SELECT id, topic_id, from_peer_id, subject, body, sent_at
+		 FROM topic_messages
+		 WHERE topic_id = ? AND sent_at < ?
 		 ORDER BY sent_at DESC, id DESC
 		 LIMIT ?`,
 	);
-	const stmtListChannelSubscribers = db.prepare<
+	const stmtListTopicSubscribers = db.prepare<
 		[string],
-		{ subscriber_topic_id: string }
-	>(
-		"SELECT subscriber_topic_id FROM channel_subscriptions WHERE channel_id = ?",
-	);
-	const stmtListChannelSummaries = db.prepare<
+		{ subscriber_peer_id: string }
+	>("SELECT subscriber_peer_id FROM topic_subscriptions WHERE topic_id = ?");
+	const stmtListTopicSummaries = db.prepare<
 		[],
 		{
 			id: string;
@@ -329,43 +355,43 @@ export function openDatabase(dbPath: string) {
 			last_published_at: string | null;
 		}
 	>(
-		`SELECT c.id, c.created_by, c.created_at,
-		        COALESCE(COUNT(DISTINCT s.subscriber_topic_id), 0) AS subscriber_count,
-		        MAX(cm.sent_at) AS last_published_at
-		 FROM channels c
-		 LEFT JOIN channel_subscriptions s ON s.channel_id = c.id
-		 LEFT JOIN channel_messages cm ON cm.channel_id = c.id
-		 GROUP BY c.id
-		 ORDER BY MAX(cm.sent_at) DESC NULLS LAST, c.created_at ASC`,
+		`SELECT t.id, t.created_by, t.created_at,
+		        COALESCE(COUNT(DISTINCT s.subscriber_peer_id), 0) AS subscriber_count,
+		        MAX(tm.sent_at) AS last_published_at
+		 FROM topics t
+		 LEFT JOIN topic_subscriptions s ON s.topic_id = t.id
+		 LEFT JOIN topic_messages tm ON tm.topic_id = t.id
+		 GROUP BY t.id
+		 ORDER BY MAX(tm.sent_at) DESC NULLS LAST, t.created_at ASC`,
 	);
-	const stmtListChannelSubscribersWithStats = db.prepare<
+	const stmtListTopicSubscribersWithStats = db.prepare<
 		[string],
 		{
-			subscriber_topic_id: string;
+			subscriber_peer_id: string;
 			subscribed_at: string;
 			queue_depth: number;
 			last_read_at: string | null;
 		}
 	>(
-		`SELECT s.subscriber_topic_id,
+		`SELECT s.subscriber_peer_id,
 		        s.subscribed_at,
-		        COALESCE(SUM(CASE WHEN m.channel_message_id IS NOT NULL AND m.acked_at IS NULL THEN 1 ELSE 0 END), 0) AS queue_depth,
-		        MAX(CASE WHEN m.channel_message_id IS NOT NULL THEN m.acked_at END) AS last_read_at
-		 FROM channel_subscriptions s
-		 LEFT JOIN channel_messages cm ON cm.channel_id = s.channel_id
+		        COALESCE(SUM(CASE WHEN m.topic_message_id IS NOT NULL AND m.acked_at IS NULL THEN 1 ELSE 0 END), 0) AS queue_depth,
+		        MAX(CASE WHEN m.topic_message_id IS NOT NULL THEN m.acked_at END) AS last_read_at
+		 FROM topic_subscriptions s
+		 LEFT JOIN topic_messages tm ON tm.topic_id = s.topic_id
 		 LEFT JOIN messages m
-		        ON m.channel_message_id = cm.id
-		       AND m.to_topic = s.subscriber_topic_id
-		 WHERE s.channel_id = ?
-		 GROUP BY s.subscriber_topic_id, s.subscribed_at
-		 ORDER BY s.subscribed_at ASC, s.subscriber_topic_id ASC`,
+		        ON m.topic_message_id = tm.id
+		       AND m.to_peer = s.subscriber_peer_id
+		 WHERE s.topic_id = ?
+		 GROUP BY s.subscriber_peer_id, s.subscribed_at
+		 ORDER BY s.subscribed_at ASC, s.subscriber_peer_id ASC`,
 	);
-	const stmtInsertChannelMessage = db.prepare<
+	const stmtInsertTopicMessage = db.prepare<
 		[string, string, string, string, string, string]
 	>(
-		"INSERT INTO channel_messages (id, channel_id, from_topic_id, subject, body, sent_at) VALUES (?, ?, ?, ?, ?, ?)",
+		"INSERT INTO topic_messages (id, topic_id, from_peer_id, subject, body, sent_at) VALUES (?, ?, ?, ?, ?, ?)",
 	);
-	const stmtInsertMessageWithChannel = db.prepare<
+	const stmtInsertMessageWithTopic = db.prepare<
 		[
 			string,
 			string,
@@ -378,58 +404,58 @@ export function openDatabase(dbPath: string) {
 			string,
 		]
 	>(
-		"INSERT INTO messages (id, from_topic, to_topic, subject, body, thread_id, sent_at, expires_at, channel_message_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+		"INSERT INTO messages (id, from_peer, to_peer, subject, body, thread_id, sent_at, expires_at, topic_message_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
 	);
 
-	function registerSession(topicId: TopicId, now: IsoTimestamp): PeerDto {
-		const existing = stmtGetSession.get(topicId);
+	function registerSession(peerId: PeerId, now: IsoTimestamp): PeerDto {
+		const existing = stmtGetSession.get(peerId);
 		if (existing) {
 			if (existing.status === SessionStatus.CONNECTED) {
-				throw new DbError("TOPIC_ALREADY_REGISTERED");
+				throw new DbError("PEER_ALREADY_REGISTERED");
 			}
-			stmtReactivateSession.run(SessionStatus.CONNECTED, now, now, topicId);
+			stmtReactivateSession.run(SessionStatus.CONNECTED, now, now, peerId);
 		} else {
-			stmtInsertSession.run(topicId, now, now, SessionStatus.CONNECTED);
+			stmtInsertSession.run(peerId, now, now, SessionStatus.CONNECTED);
 		}
 		return {
-			topicId,
+			peerId,
 			status: SessionStatus.CONNECTED,
 			connectedAt: now,
 			lastSeenAt: now,
 			lastActivityAt: null,
-			queueLength: stmtCountQueue.get(topicId)?.c ?? 0,
+			queueLength: stmtCountQueue.get(peerId)?.c ?? 0,
 		};
 	}
 
 	const unregisterTx = db.transaction(
-		(topicId: TopicId, purge: boolean): { purged: boolean } => {
-			stmtDeleteSession.run(topicId);
-			if (purge) stmtPurgeQueue.run(topicId);
+		(peerId: PeerId, purge: boolean): { purged: boolean } => {
+			stmtDeleteSession.run(peerId);
+			if (purge) stmtPurgeQueue.run(peerId);
 			return { purged: purge };
 		},
 	);
 
-	function markDisconnected(topicId: TopicId, now: IsoTimestamp): void {
-		stmtMarkDisconnected.run(SessionStatus.DISCONNECTED, now, topicId);
+	function markDisconnected(peerId: PeerId, now: IsoTimestamp): void {
+		stmtMarkDisconnected.run(SessionStatus.DISCONNECTED, now, peerId);
 	}
 
-	function touchLastSeen(topicId: TopicId, now: IsoTimestamp): void {
-		stmtTouchLastSeen.run(now, topicId);
+	function touchLastSeen(peerId: PeerId, now: IsoTimestamp): void {
+		stmtTouchLastSeen.run(now, peerId);
 	}
 
-	function updateLastActivity(topicId: TopicId, now: IsoTimestamp): void {
-		stmtUpdateLastActivity.run(now, topicId);
+	function updateLastActivity(peerId: PeerId, now: IsoTimestamp): void {
+		stmtUpdateLastActivity.run(now, peerId);
 	}
 
-	function inspectLastActivityAt(topicId: TopicId): string | null {
-		const row = stmtSelectLastActivity.get(topicId);
+	function inspectLastActivityAt(peerId: PeerId): string | null {
+		const row = stmtSelectLastActivity.get(peerId);
 		return row?.last_activity_at ?? null;
 	}
 
-	function getSession(topicId: TopicId): PeerDto | null {
-		const row = stmtGetSession.get(topicId);
+	function getSession(peerId: PeerId): PeerDto | null {
+		const row = stmtGetSession.get(peerId);
 		if (!row) return null;
-		return rowToPeer(row, stmtCountQueue.get(topicId)?.c ?? 0);
+		return rowToPeer(row, stmtCountQueue.get(peerId)?.c ?? 0);
 	}
 
 	function listSessions(): PeerDto[] {
@@ -452,12 +478,12 @@ export function openDatabase(dbPath: string) {
 
 	const fetchDeliverableTx = db.transaction(
 		(
-			topicId: TopicId,
+			peerId: PeerId,
 			max: number,
 			now: IsoTimestamp,
 			inFlightUntil: IsoTimestamp,
 		): MessageDto[] => {
-			const rows = stmtSelectDeliverable.all(topicId, now, max);
+			const rows = stmtSelectDeliverable.all(peerId, now, max);
 			return rows.map((row) => {
 				stmtSetInFlight.run(inFlightUntil, row.id);
 				return { ...rowToMessage(row), inFlightUntil };
@@ -466,11 +492,11 @@ export function openDatabase(dbPath: string) {
 	);
 
 	function ackMessage(
-		topicId: TopicId,
+		peerId: PeerId,
 		messageId: MessageId,
 		now: IsoTimestamp,
 	): IsoTimestamp {
-		const row = stmtGetMessage.get(messageId, topicId);
+		const row = stmtGetMessage.get(messageId, peerId);
 		if (!row) throw new DbError("MESSAGE_NOT_FOUND");
 		if (row.in_flight_until === null)
 			throw new DbError("MESSAGE_NOT_IN_FLIGHT");
@@ -490,31 +516,31 @@ export function openDatabase(dbPath: string) {
 		return rows.map((r) => r.id);
 	}
 
-	function createChannel(
-		channelId: string,
-		createdBy: TopicId,
+	function createTopic(
+		topicId: TopicId,
+		createdBy: PeerId,
 		now: IsoTimestamp,
 	): void {
-		const existing = stmtGetChannel.get(channelId);
-		if (existing) throw new DbError("CHANNEL_ALREADY_EXISTS");
-		stmtInsertChannel.run(channelId, now, createdBy);
+		const existing = stmtGetTopic.get(topicId);
+		if (existing) throw new DbError("TOPIC_ALREADY_EXISTS");
+		stmtInsertTopic.run(topicId, now, createdBy);
 	}
 
-	function listChannelSubscribers(channelId: string): TopicId[] {
-		return stmtListChannelSubscribers
-			.all(channelId)
-			.map((r) => r.subscriber_topic_id);
+	function listTopicSubscribers(topicId: TopicId): PeerId[] {
+		return stmtListTopicSubscribers
+			.all(topicId)
+			.map((r) => r.subscriber_peer_id);
 	}
 
-	function subscribeChannel(
-		channelId: string,
-		subscriberTopicId: TopicId,
+	function subscribeTopic(
+		topicId: TopicId,
+		subscriberPeerId: PeerId,
 		now: IsoTimestamp,
 	): void {
-		const channel = stmtGetChannel.get(channelId);
-		if (!channel) throw new DbError("CHANNEL_NOT_FOUND");
+		const topic = stmtGetTopic.get(topicId);
+		if (!topic) throw new DbError("TOPIC_NOT_FOUND");
 		try {
-			stmtInsertChannelSubscription.run(channelId, subscriberTopicId, now);
+			stmtInsertTopicSubscription.run(topicId, subscriberPeerId, now);
 		} catch (err: unknown) {
 			if (
 				err instanceof Error &&
@@ -526,41 +552,37 @@ export function openDatabase(dbPath: string) {
 		}
 	}
 
-	// channel 존재 check + DELETE 를 atomic 하게 수행해야 향후 channel delete RPC 추가 시 race-free.
-	const unsubscribeChannelTx = db.transaction(
-		(channelId: string, subscriberTopicId: TopicId): void => {
-			const channel = stmtGetChannel.get(channelId);
-			if (!channel) throw new DbError("CHANNEL_NOT_FOUND");
-			const result = stmtDeleteChannelSubscription.run(
-				channelId,
-				subscriberTopicId,
-			);
+	const unsubscribeTopicTx = db.transaction(
+		(topicId: TopicId, subscriberPeerId: PeerId): void => {
+			const topic = stmtGetTopic.get(topicId);
+			if (!topic) throw new DbError("TOPIC_NOT_FOUND");
+			const result = stmtDeleteTopicSubscription.run(topicId, subscriberPeerId);
 			if (result.changes === 0) throw new DbError("NOT_SUBSCRIBED");
 		},
 	);
 
-	function fetchChannelHistory(
-		channelId: string,
+	function fetchTopicHistory(
+		topicId: TopicId,
 		limit: number,
 		beforeSentAt: IsoTimestamp | null,
-	): ChannelMessageRow[] {
-		const channel = stmtGetChannel.get(channelId);
-		if (!channel) throw new DbError("CHANNEL_NOT_FOUND");
+	): TopicMessageRow[] {
+		const topic = stmtGetTopic.get(topicId);
+		if (!topic) throw new DbError("TOPIC_NOT_FOUND");
 		return beforeSentAt === null
-			? stmtListChannelHistoryAll.all(channelId, limit + 1)
-			: stmtListChannelHistoryBefore.all(channelId, beforeSentAt, limit + 1);
+			? stmtListTopicHistoryAll.all(topicId, limit + 1)
+			: stmtListTopicHistoryBefore.all(topicId, beforeSentAt, limit + 1);
 	}
 
-	function fetchChannelDetail(channelId: string): ChannelDetailRow {
-		const channel = stmtGetChannel.get(channelId);
-		if (!channel) throw new DbError("CHANNEL_NOT_FOUND");
-		const rows = stmtListChannelSubscribersWithStats.all(channelId);
+	function fetchTopicDetail(topicId: TopicId): TopicDetailRow {
+		const topic = stmtGetTopic.get(topicId);
+		if (!topic) throw new DbError("TOPIC_NOT_FOUND");
+		const rows = stmtListTopicSubscribersWithStats.all(topicId);
 		return {
-			channelId: channel.id,
-			createdBy: channel.created_by,
-			createdAt: channel.created_at,
+			topicId: topic.id,
+			createdBy: topic.created_by,
+			createdAt: topic.created_at,
 			subscribers: rows.map((r) => ({
-				topicId: r.subscriber_topic_id,
+				peerId: r.subscriber_peer_id,
 				subscribedAt: r.subscribed_at,
 				queueDepth: r.queue_depth,
 				lastReadAt: r.last_read_at,
@@ -568,10 +590,10 @@ export function openDatabase(dbPath: string) {
 		};
 	}
 
-	function listChannelSummaries(): ChannelSummaryDto[] {
-		const rows = stmtListChannelSummaries.all();
+	function listTopicSummaries(): TopicSummaryDto[] {
+		const rows = stmtListTopicSummaries.all();
 		return rows.map((r) => ({
-			channelId: r.id,
+			topicId: r.id,
 			createdBy: r.created_by,
 			createdAt: r.created_at,
 			subscriberCount: r.subscriber_count,
@@ -579,23 +601,23 @@ export function openDatabase(dbPath: string) {
 		}));
 	}
 
-	const channelSendTx = db.transaction(
-		(input: ChannelSendInput): { deliveredTo: TopicId[] } => {
-			const channel = stmtGetChannel.get(input.channelId);
-			if (!channel) throw new DbError("CHANNEL_NOT_FOUND");
+	const topicSendTx = db.transaction(
+		(input: TopicSendInput): { deliveredTo: PeerId[] } => {
+			const topic = stmtGetTopic.get(input.topicId);
+			if (!topic) throw new DbError("TOPIC_NOT_FOUND");
 
-			stmtInsertChannelMessage.run(
-				input.channelMessageId,
-				input.channelId,
+			stmtInsertTopicMessage.run(
+				input.topicMessageId,
+				input.topicId,
 				input.from,
 				input.subject,
 				input.body,
 				input.sentAt,
 			);
 
-			const subscribers = stmtListChannelSubscribers
-				.all(input.channelId)
-				.map((r) => r.subscriber_topic_id)
+			const subscribers = stmtListTopicSubscribers
+				.all(input.topicId)
+				.map((r) => r.subscriber_peer_id)
 				.filter((sid) => sid !== input.from);
 
 			if (subscribers.length !== input.deliveryMessageIds.length) {
@@ -605,7 +627,7 @@ export function openDatabase(dbPath: string) {
 			}
 
 			subscribers.forEach((subscriberId, i) => {
-				stmtInsertMessageWithChannel.run(
+				stmtInsertMessageWithTopic.run(
 					input.deliveryMessageIds[i] as string,
 					input.from,
 					subscriberId,
@@ -614,7 +636,7 @@ export function openDatabase(dbPath: string) {
 					null,
 					input.sentAt,
 					input.expiresAt,
-					input.channelMessageId,
+					input.topicMessageId,
 				);
 			});
 
@@ -624,8 +646,8 @@ export function openDatabase(dbPath: string) {
 
 	return {
 		registerSession,
-		unregisterSession: (topicId: TopicId, purge: boolean) =>
-			unregisterTx(topicId, purge),
+		unregisterSession: (peerId: PeerId, purge: boolean) =>
+			unregisterTx(peerId, purge),
 		markDisconnected,
 		touchLastSeen,
 		updateLastActivity,
@@ -634,23 +656,23 @@ export function openDatabase(dbPath: string) {
 		listSessions,
 		insertMessage,
 		fetchDeliverable: (
-			topicId: TopicId,
+			peerId: PeerId,
 			max: number,
 			now: IsoTimestamp,
 			inFlightUntil: IsoTimestamp,
-		) => fetchDeliverableTx(topicId, max, now, inFlightUntil),
+		) => fetchDeliverableTx(peerId, max, now, inFlightUntil),
 		ackMessage,
 		expireInFlight,
 		deleteExpired,
-		createChannel,
-		subscribeChannel,
-		unsubscribeChannel: (channelId: string, subscriberTopicId: TopicId) =>
-			unsubscribeChannelTx(channelId, subscriberTopicId),
-		fetchChannelHistory,
-		fetchChannelDetail,
-		listChannelSubscribers,
-		listChannelSummaries,
-		channelSend: (input: ChannelSendInput) => channelSendTx(input),
+		createTopic,
+		subscribeTopic,
+		unsubscribeTopic: (topicId: TopicId, subscriberPeerId: PeerId) =>
+			unsubscribeTopicTx(topicId, subscriberPeerId),
+		fetchTopicHistory,
+		fetchTopicDetail,
+		listTopicSubscribers,
+		listTopicSummaries,
+		topicSend: (input: TopicSendInput) => topicSendTx(input),
 		close: (): void => {
 			db.close();
 		},

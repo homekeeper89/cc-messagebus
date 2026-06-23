@@ -35,11 +35,11 @@ export function parseSseChunks(buffer: string): ParseSseChunksResult {
 }
 
 export async function runTail(
-	topicId: string,
+	peerId: string,
 	opts: RunTailOptions = {},
 ): Promise<void> {
 	const baseUrl = opts.baseUrl ?? DEFAULT_BASE_URL;
-	const url = `${baseUrl}/tail/${encodeURIComponent(topicId)}`;
+	const url = `${baseUrl}/tail/${encodeURIComponent(peerId)}`;
 
 	const controller = new AbortController();
 	const onSigint = (): void => controller.abort();

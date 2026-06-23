@@ -19,7 +19,7 @@ import {
 	McpClientError,
 } from "./broker-client.js";
 import { ensureBrokerRunning, type SpawnCmd } from "./spawn.js";
-import { clearTopicId, requireTopicId, setTopicId } from "./state.js";
+import { clearPeerId, requirePeerId, setPeerId } from "./state.js";
 
 const DEFAULT_BROKER_URL = "http://127.0.0.1:5959";
 
@@ -64,22 +64,22 @@ export async function dispatch(
 	switch (name) {
 		case MCP_TOOL_NAMES.register: {
 			await ensureBrokerRunning(client, spawnCmd);
-			const topicId = args.topicId as string;
-			const res = await client.register({ topicId });
-			setTopicId(topicId);
+			const peerId = args.peerId as string;
+			const res = await client.register({ peerId });
+			setPeerId(peerId);
 			return res;
 		}
 		case MCP_TOOL_NAMES.unregister: {
-			const topicId = requireTopicId();
+			const peerId = requirePeerId();
 			const res = await client.unregister({
-				topicId,
+				peerId,
 				purgeQueue: args.purgeQueue as boolean | undefined,
 			});
-			clearTopicId();
+			clearPeerId();
 			return res;
 		}
 		case MCP_TOOL_NAMES.send: {
-			const from = requireTopicId();
+			const from = requirePeerId();
 			return client.send({
 				from,
 				to: args.to as string,
@@ -89,66 +89,66 @@ export async function dispatch(
 			});
 		}
 		case MCP_TOOL_NAMES.read: {
-			const topicId = requireTopicId();
+			const peerId = requirePeerId();
 			return client.read({
-				topicId,
+				peerId,
 				max: args.max as number | undefined,
 			});
 		}
 		case MCP_TOOL_NAMES.ack: {
-			const topicId = requireTopicId();
+			const peerId = requirePeerId();
 			return client.ack({
-				topicId,
+				peerId,
 				messageId: args.messageId as string,
 			});
 		}
 		case MCP_TOOL_NAMES.listPeers:
 			return client.listPeers();
-		case MCP_TOOL_NAMES.listChannels:
-			// PRD: ACL 없음 — 누구나 list 가능. requireTopicId 의도적으로 호출 안 함.
-			return client.listChannels();
-		case MCP_TOOL_NAMES.channelCreate: {
-			const createdBy = requireTopicId();
-			return client.channelCreate({
-				channelId: args.channelId as string,
+		case MCP_TOOL_NAMES.listTopics:
+			// PRD: ACL 없음 — 누구나 list 가능. requirePeerId 의도적으로 호출 안 함.
+			return client.listTopics();
+		case MCP_TOOL_NAMES.topicCreate: {
+			const createdBy = requirePeerId();
+			return client.topicCreate({
+				topicId: args.topicId as string,
 				createdBy,
 			});
 		}
-		case MCP_TOOL_NAMES.channelSubscribe: {
-			const topicId = requireTopicId();
-			return client.channelSubscribe({
-				channelId: args.channelId as string,
-				topicId,
+		case MCP_TOOL_NAMES.topicSubscribe: {
+			const peerId = requirePeerId();
+			return client.topicSubscribe({
+				topicId: args.topicId as string,
+				peerId,
 			});
 		}
-		case MCP_TOOL_NAMES.channelSend: {
-			const from = requireTopicId();
-			return client.channelSend({
-				channelId: args.channelId as string,
+		case MCP_TOOL_NAMES.topicSend: {
+			const from = requirePeerId();
+			return client.topicSend({
+				topicId: args.topicId as string,
 				from,
 				subject: args.subject as string,
 				body: args.body as string,
 			});
 		}
-		case MCP_TOOL_NAMES.channelUnsubscribe: {
-			const topicId = requireTopicId();
-			return client.channelUnsubscribe({
-				channelId: args.channelId as string,
-				topicId,
+		case MCP_TOOL_NAMES.topicUnsubscribe: {
+			const peerId = requirePeerId();
+			return client.topicUnsubscribe({
+				topicId: args.topicId as string,
+				peerId,
 			});
 		}
-		case MCP_TOOL_NAMES.channelHistory: {
-			// PRD: ACL 없음 — 누구나 read 가능. requireTopicId 의도적으로 호출 안 함.
-			return client.channelHistory({
-				channelId: args.channelId as string,
+		case MCP_TOOL_NAMES.topicHistory: {
+			// PRD: ACL 없음 — 누구나 read 가능. requirePeerId 의도적으로 호출 안 함.
+			return client.topicHistory({
+				topicId: args.topicId as string,
 				limit: args.limit as number | undefined,
 				beforeSentAt: args.beforeSentAt as string | undefined,
 			});
 		}
-		case MCP_TOOL_NAMES.channelDetail: {
-			// PRD: ACL 없음 — 누구나 read 가능. requireTopicId 의도적으로 호출 안 함.
-			return client.channelDetail({
-				channelId: args.channelId as string,
+		case MCP_TOOL_NAMES.topicDetail: {
+			// PRD: ACL 없음 — 누구나 read 가능. requirePeerId 의도적으로 호출 안 함.
+			return client.topicDetail({
+				topicId: args.topicId as string,
 			});
 		}
 		default:

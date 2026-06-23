@@ -220,12 +220,12 @@
 			#flow li[data-kind="session_disconnected"] .kind {
 				color: var(--muted);
 			}
-			#flow li[data-kind="channel_created"] .kind,
-			#flow li[data-kind="channel_subscribed"] .kind,
-			#flow li[data-kind="channel_unsubscribed"] .kind {
+			#flow li[data-kind="topic_created"] .kind,
+			#flow li[data-kind="topic_subscribed"] .kind,
+			#flow li[data-kind="topic_unsubscribed"] .kind {
 				color: var(--muted);
 			}
-			#flow li[data-kind="channel_message_published"] .kind {
+			#flow li[data-kind="topic_message_published"] .kind {
 				color: var(--accent);
 			}
 			#flow li pre {
@@ -296,7 +296,7 @@
 				font-style: italic;
 				padding: 4px;
 			}
-			#detail .card-list li .topic {
+			#detail .card-list li .peer {
 				color: var(--text);
 				font-weight: 600;
 			}
@@ -334,9 +334,9 @@
 					<span class="tree-label">ALL</span>
 				</div>
 				<div class="tree-section">
-					<h2>Agents <span id="agents-count">(0)</span></h2>
-					<ul id="agents" class="tree-list">
-						<li class="empty">(no agents)</li>
+					<h2>Peers <span id="peers-count">(0)</span></h2>
+					<ul id="peers" class="tree-list">
+						<li class="empty">(no peers)</li>
 					</ul>
 				</div>
 				<div class="tree-section">
@@ -346,9 +346,9 @@
 					</div>
 				</div>
 				<div class="tree-section">
-					<h2>Channels <span id="channels-count">(0)</span></h2>
-					<ul id="channels" class="tree-list">
-						<li class="empty">(no channels)</li>
+					<h2>Topics <span id="topics-count">(0)</span></h2>
+					<ul id="topics" class="tree-list">
+						<li class="empty">(no topics)</li>
 					</ul>
 				</div>
 			</aside>
@@ -382,17 +382,17 @@
 			const HISTORY_REFRESH_DEBOUNCE_MS = 250;
 
 			const sessions = new Map();
-			const channels = new Map();
+			const topics = new Map();
 			const flowBuffer = [];
 			let selectedContext = { type: "all" };
-			let channelDetail = null;
-			let channelHistory = [];
+			let topicDetail = null;
+			let topicHistory = [];
 			let historyRefreshTimer = null;
 
-			const agentsEl = document.getElementById("agents");
-			const agentsCountEl = document.getElementById("agents-count");
-			const channelsEl = document.getElementById("channels");
-			const channelsCountEl = document.getElementById("channels-count");
+			const peersEl = document.getElementById("peers");
+			const peersCountEl = document.getElementById("peers-count");
+			const topicsEl = document.getElementById("topics");
+			const topicsCountEl = document.getElementById("topics-count");
 			const treeAllEl = document.getElementById("tree-all");
 			const treeDmsEl = document.getElementById("tree-dms");
 			const flowEl = document.getElementById("flow");
@@ -440,8 +440,8 @@
 
 			function sameContext(a, b) {
 				if (a.type !== b.type) return false;
-				if (a.type === "agent") return a.topicId === b.topicId;
-				if (a.type === "channel") return a.channelId === b.channelId;
+				if (a.type === "agent") return a.peerId === b.peerId;
+				if (a.type === "topic") return a.topicId === b.topicId;
 				return true;
 			}
 
@@ -452,34 +452,34 @@
 
 			function renderFlowHeader() {
 				let label = "ALL";
-				if (selectedContext.type === "agent") label = selectedContext.topicId;
-				else if (selectedContext.type === "channel")
-					label = `#${selectedContext.channelId}`;
+				if (selectedContext.type === "agent") label = selectedContext.peerId;
+				else if (selectedContext.type === "topic")
+					label = `#${selectedContext.topicId}`;
 				else if (selectedContext.type === "dm") label = "DMs";
 				flowHeaderEl.textContent = `Message Flow · ${label}`;
 			}
 
-			function renderAgents() {
-				agentsCountEl.textContent = `(${sessions.size})`;
+			function renderPeers() {
+				peersCountEl.textContent = `(${sessions.size})`;
 				if (sessions.size === 0) {
-					agentsEl.replaceChildren();
+					peersEl.replaceChildren();
 					const li = document.createElement("li");
 					li.className = "empty";
-					li.textContent = "(no agents)";
-					agentsEl.append(li);
+					li.textContent = "(no peers)";
+					peersEl.append(li);
 					return;
 				}
 				const entries = [...sessions.values()].sort((a, b) =>
 					compareDescNullsLast(a.lastActivityAt, b.lastActivityAt),
 				);
-				agentsEl.replaceChildren(
+				peersEl.replaceChildren(
 					...entries.map((p) => {
 						const li = document.createElement("li");
 						li.dataset.status = p.status ?? "connected";
-						li.dataset.topicId = p.topicId;
+						li.dataset.peerId = p.peerId;
 						if (
 							selectedContext.type === "agent" &&
-							selectedContext.topicId === p.topicId
+							selectedContext.peerId === p.peerId
 						) {
 							li.dataset.selected = "1";
 						}
@@ -487,51 +487,51 @@
 						dot.className = "dot";
 						const name = document.createElement("span");
 						name.className = "name";
-						name.textContent = p.topicId;
+						name.textContent = p.peerId;
 						const meta = document.createElement("span");
 						meta.className = "meta";
 						meta.textContent = relativeAgo(p.lastActivityAt);
 						li.append(dot, name, meta);
 						li.addEventListener("click", () =>
-							onTreeRowClick({ type: "agent", topicId: p.topicId }),
+							onTreeRowClick({ type: "agent", peerId: p.peerId }),
 						);
 						return li;
 					}),
 				);
 			}
 
-			function renderChannels() {
-				channelsCountEl.textContent = `(${channels.size})`;
-				if (channels.size === 0) {
-					channelsEl.replaceChildren();
+			function renderTopics() {
+				topicsCountEl.textContent = `(${topics.size})`;
+				if (topics.size === 0) {
+					topicsEl.replaceChildren();
 					const li = document.createElement("li");
 					li.className = "empty";
-					li.textContent = "(no channels)";
-					channelsEl.append(li);
+					li.textContent = "(no topics)";
+					topicsEl.append(li);
 					return;
 				}
-				const entries = [...channels.values()].sort((a, b) =>
+				const entries = [...topics.values()].sort((a, b) =>
 					compareDescNullsLast(a.lastPublishedAt, b.lastPublishedAt),
 				);
-				channelsEl.replaceChildren(
+				topicsEl.replaceChildren(
 					...entries.map((c) => {
 						const li = document.createElement("li");
-						li.dataset.channelId = c.channelId;
+						li.dataset.topicId = c.topicId;
 						if (
-							selectedContext.type === "channel" &&
-							selectedContext.channelId === c.channelId
+							selectedContext.type === "topic" &&
+							selectedContext.topicId === c.topicId
 						) {
 							li.dataset.selected = "1";
 						}
 						const name = document.createElement("span");
 						name.className = "name";
-						name.textContent = `#${c.channelId}`;
+						name.textContent = `#${c.topicId}`;
 						const meta = document.createElement("span");
 						meta.className = "meta";
 						meta.textContent = relativeAgo(c.lastPublishedAt);
 						li.append(name, meta);
 						li.addEventListener("click", () =>
-							onTreeRowClick({ type: "channel", channelId: c.channelId }),
+							onTreeRowClick({ type: "topic", topicId: c.topicId }),
 						);
 						return li;
 					}),
@@ -544,21 +544,21 @@
 						return `${event.message.from} → ${event.message.to}  ${event.message.subject}`;
 					case "message_read":
 					case "message_acked":
-						return `${event.topicId}  ${event.messageId.slice(0, 8)}`;
+						return `${event.peerId}  ${event.messageId.slice(0, 8)}`;
 					case "message_redelivered":
 					case "message_expired":
 						return event.messageId.slice(0, 8);
 					case "session_registered":
-						return event.peer.topicId;
+						return event.peer.peerId;
 					case "session_disconnected":
-						return event.topicId;
-					case "channel_created":
-						return event.channel.channelId;
-					case "channel_subscribed":
-					case "channel_unsubscribed":
-						return `${event.topicId}  ${event.channelId}`;
-					case "channel_message_published":
-						return `${event.from} → [${event.deliveredTo.join(", ")}]  ${event.channelId}`;
+						return event.peerId;
+					case "topic_created":
+						return event.topic.topicId;
+					case "topic_subscribed":
+					case "topic_unsubscribed":
+						return `${event.peerId}  ${event.topicId}`;
+					case "topic_message_published":
+						return `${event.from} → [${event.deliveredTo.join(", ")}]  ${event.topicId}`;
 					default:
 						return "";
 				}
@@ -574,7 +574,7 @@
 					event.at ??
 					event.message?.sentAt ??
 					event.sentAt ??
-					event.channel?.createdAt ??
+					event.topic?.createdAt ??
 					new Date().toISOString();
 				const time = document.createElement("span");
 				time.className = "time";
@@ -584,7 +584,7 @@
 				kind.textContent = event.type
 					.replace(/^message_/, "")
 					.replace(/^session_/, "")
-					.replace(/^channel_/, "");
+					.replace(/^topic_/, "");
 				const desc = document.createTextNode(describe(event));
 				li.append(time, kind, desc);
 				const detail = document.createElement("pre");
@@ -607,39 +607,39 @@
 					const t = event.type;
 					if (t === "message_sent")
 						return (
-							event.message.from === ctx.topicId ||
-							event.message.to === ctx.topicId
+							event.message.from === ctx.peerId ||
+							event.message.to === ctx.peerId
 						);
 					if (t === "message_read" || t === "message_acked")
-						return event.topicId === ctx.topicId;
+						return event.peerId === ctx.peerId;
 					if (t === "session_registered")
-						return event.peer.topicId === ctx.topicId;
-					if (t === "session_disconnected") return event.topicId === ctx.topicId;
-					if (t === "channel_subscribed" || t === "channel_unsubscribed")
-						return event.topicId === ctx.topicId;
-					if (t === "channel_message_published")
+						return event.peer.peerId === ctx.peerId;
+					if (t === "session_disconnected") return event.peerId === ctx.peerId;
+					if (t === "topic_subscribed" || t === "topic_unsubscribed")
+						return event.peerId === ctx.peerId;
+					if (t === "topic_message_published")
 						return (
-							event.from === ctx.topicId ||
-							(event.deliveredTo ?? []).includes(ctx.topicId)
+							event.from === ctx.peerId ||
+							(event.deliveredTo ?? []).includes(ctx.peerId)
 						);
 					return false;
 				}
 
-				if (ctx.type === "channel") {
+				if (ctx.type === "topic") {
 					const t = event.type;
-					if (t === "channel_created")
-						return event.channel.channelId === ctx.channelId;
+					if (t === "topic_created")
+						return event.topic.topicId === ctx.topicId;
 					if (
-						t === "channel_subscribed" ||
-						t === "channel_unsubscribed" ||
-						t === "channel_message_published"
+						t === "topic_subscribed" ||
+						t === "topic_unsubscribed" ||
+						t === "topic_message_published"
 					)
-						return event.channelId === ctx.channelId;
+						return event.topicId === ctx.topicId;
 					return false;
 				}
 
 				if (ctx.type === "dm") {
-					// NOTE: channel fanout emits message_sent without channelId marker,
+					// NOTE: topic fanout emits message_sent without topicId marker,
 					// so DM filter passes all message_* events (PRD-decided "flat" DMs).
 					return event.type.startsWith("message_");
 				}
@@ -671,7 +671,7 @@
 			}
 
 			function isDetailMode() {
-				return selectedContext.type === "channel";
+				return selectedContext.type === "topic";
 			}
 
 			function makeEmpty(text) {
@@ -681,11 +681,11 @@
 				return li;
 			}
 
-			function enterChannelDetail(channelId) {
+			function enterTopicDetail(topicId) {
 				flowHeaderEl.hidden = true;
 				flowEl.hidden = true;
 				detailRoot.hidden = false;
-				detailTitleEl.textContent = `#${channelId}`;
+				detailTitleEl.textContent = `#${topicId}`;
 				detailMetaEl.textContent = "loading…";
 				detailSubsCountEl.textContent = "(0)";
 				detailHistMetaEl.textContent = "(0)";
@@ -693,12 +693,12 @@
 				detailHistEl.replaceChildren(makeEmpty("loading…"));
 			}
 
-			function exitChannelDetail() {
+			function exitTopicDetail() {
 				flowHeaderEl.hidden = false;
 				flowEl.hidden = false;
 				detailRoot.hidden = true;
-				channelDetail = null;
-				channelHistory = [];
+				topicDetail = null;
+				topicHistory = [];
 				if (historyRefreshTimer) {
 					clearTimeout(historyRefreshTimer);
 					historyRefreshTimer = null;
@@ -706,17 +706,17 @@
 			}
 
 			function renderDetailHeader() {
-				if (!channelDetail) return;
-				detailTitleEl.textContent = `#${channelDetail.channelId}`;
-				const subCount = channelDetail.subscribers.length;
-				const created = new Date(channelDetail.createdAt).toLocaleString();
+				if (!topicDetail) return;
+				detailTitleEl.textContent = `#${topicDetail.topicId}`;
+				const subCount = topicDetail.subscribers.length;
+				const created = new Date(topicDetail.createdAt).toLocaleString();
 				const noun = subCount === 1 ? "subscriber" : "subscribers";
-				detailMetaEl.textContent = `created by ${channelDetail.createdBy} · ${created} · ${subCount} ${noun}`;
+				detailMetaEl.textContent = `created by ${topicDetail.createdBy} · ${created} · ${subCount} ${noun}`;
 			}
 
 			function renderDetailSubscribers() {
-				if (!channelDetail) return;
-				const subs = channelDetail.subscribers;
+				if (!topicDetail) return;
+				const subs = topicDetail.subscribers;
 				detailSubsCountEl.textContent = `(${subs.length})`;
 				if (subs.length === 0) {
 					detailSubsEl.replaceChildren(makeEmpty("(no subscribers)"));
@@ -725,9 +725,9 @@
 				detailSubsEl.replaceChildren(
 					...subs.map((s) => {
 						const li = document.createElement("li");
-						const topic = document.createElement("span");
-						topic.className = "topic";
-						topic.textContent = s.topicId;
+						const peer = document.createElement("span");
+						peer.className = "peer";
+						peer.textContent = s.peerId;
 						const q = document.createElement("span");
 						q.className = "stat";
 						q.textContent = `queue ${s.queueDepth}`;
@@ -739,14 +739,14 @@
 						const sub = document.createElement("span");
 						sub.className = "stat";
 						sub.textContent = `subscribed ${relativeAgo(s.subscribedAt)} ago`;
-						li.append(topic, q, lr, sub);
+						li.append(peer, q, lr, sub);
 						return li;
 					}),
 				);
 			}
 
 			function renderDetailHistory() {
-				const msgs = channelHistory;
+				const msgs = topicHistory;
 				detailHistMetaEl.textContent = `(${msgs.length})`;
 				if (msgs.length === 0) {
 					detailHistEl.replaceChildren(makeEmpty("(no messages)"));
@@ -771,17 +771,17 @@
 				);
 			}
 
-			async function loadChannelDetail(channelId) {
+			async function loadTopicDetail(topicId) {
 				try {
-					const res = await fetch("/api/channel_detail", {
+					const res = await fetch("/api/topic_detail", {
 						method: "POST",
 						headers: { "Content-Type": "application/json" },
-						body: JSON.stringify({ channelId }),
+						body: JSON.stringify({ topicId }),
 					});
 					const json = await res.json();
 					if (!json?.success) return;
-					if (!isDetailMode() || selectedContext.channelId !== channelId) return;
-					channelDetail = json.data?.channel ?? null;
+					if (!isDetailMode() || selectedContext.topicId !== topicId) return;
+					topicDetail = json.data?.topic ?? null;
 					renderDetailHeader();
 					renderDetailSubscribers();
 				} catch {
@@ -789,17 +789,17 @@
 				}
 			}
 
-			async function loadChannelHistory(channelId) {
+			async function loadTopicHistory(topicId) {
 				try {
-					const res = await fetch("/api/channel_history", {
+					const res = await fetch("/api/topic_history", {
 						method: "POST",
 						headers: { "Content-Type": "application/json" },
-						body: JSON.stringify({ channelId, limit: HISTORY_LIMIT }),
+						body: JSON.stringify({ topicId, limit: HISTORY_LIMIT }),
 					});
 					const json = await res.json();
 					if (!json?.success) return;
-					if (!isDetailMode() || selectedContext.channelId !== channelId) return;
-					channelHistory = json.data?.messages ?? [];
+					if (!isDetailMode() || selectedContext.topicId !== topicId) return;
+					topicHistory = json.data?.messages ?? [];
 					renderDetailHistory();
 				} catch {
 					// 무시
@@ -808,11 +808,11 @@
 
 			function scheduleHistoryRefresh() {
 				if (historyRefreshTimer) clearTimeout(historyRefreshTimer);
-				const channelId = selectedContext.channelId;
+				const topicId = selectedContext.topicId;
 				historyRefreshTimer = setTimeout(() => {
 					historyRefreshTimer = null;
-					if (isDetailMode() && selectedContext.channelId === channelId) {
-						loadChannelHistory(channelId);
+					if (isDetailMode() && selectedContext.topicId === topicId) {
+						loadTopicHistory(topicId);
 					}
 				}, HISTORY_REFRESH_DEBOUNCE_MS);
 			}
@@ -820,17 +820,17 @@
 			function onTreeRowClick(ctx) {
 				const next = sameContext(selectedContext, ctx) ? { type: "all" } : ctx;
 				const wasDetail = isDetailMode();
-				const willBeDetail = next.type === "channel";
+				const willBeDetail = next.type === "topic";
 				selectedContext = next;
 				renderTreeSelection();
-				renderAgents();
-				renderChannels();
+				renderPeers();
+				renderTopics();
 				if (willBeDetail) {
-					enterChannelDetail(next.channelId);
-					loadChannelDetail(next.channelId);
-					loadChannelHistory(next.channelId);
+					enterTopicDetail(next.topicId);
+					loadTopicDetail(next.topicId);
+					loadTopicHistory(next.topicId);
 				} else {
-					if (wasDetail) exitChannelDetail();
+					if (wasDetail) exitTopicDetail();
 					renderFlowHeader();
 					rerenderFlowWithCurrentFilter();
 				}
@@ -843,89 +843,89 @@
 
 			function applySnapshot(peers) {
 				sessions.clear();
-				for (const p of peers) sessions.set(p.topicId, p);
-				renderAgents();
+				for (const p of peers) sessions.set(p.peerId, p);
+				renderPeers();
 			}
 
 			function applyRegistered(peer) {
-				sessions.set(peer.topicId, { ...peer, status: "connected" });
-				renderAgents();
+				sessions.set(peer.peerId, { ...peer, status: "connected" });
+				renderPeers();
 			}
 
-			function applyDisconnected(topicId) {
-				const existing = sessions.get(topicId);
+			function applyDisconnected(peerId) {
+				const existing = sessions.get(peerId);
 				if (existing) {
-					sessions.set(topicId, { ...existing, status: "disconnected" });
-					renderAgents();
+					sessions.set(peerId, { ...existing, status: "disconnected" });
+					renderPeers();
 				}
 			}
 
-			function applyQueueDelta(topicId, delta) {
-				const existing = sessions.get(topicId);
+			function applyQueueDelta(peerId, delta) {
+				const existing = sessions.get(peerId);
 				if (!existing) return;
 				const next = Math.max(0, (existing.queueLength ?? 0) + delta);
-				sessions.set(topicId, { ...existing, queueLength: next });
-				renderAgents();
+				sessions.set(peerId, { ...existing, queueLength: next });
+				renderPeers();
 			}
 
-			function applyLastActivity(topicId, at) {
-				const existing = sessions.get(topicId);
+			function applyLastActivity(peerId, at) {
+				const existing = sessions.get(peerId);
 				if (!existing) return;
-				sessions.set(topicId, { ...existing, lastActivityAt: at });
-				renderAgents();
+				sessions.set(peerId, { ...existing, lastActivityAt: at });
+				renderPeers();
 			}
 
-			function applyChannelCreated(channel) {
-				channels.set(channel.channelId, {
-					...channel,
+			function applyTopicCreated(topic) {
+				topics.set(topic.topicId, {
+					...topic,
 					subscriberCount: 0,
 					lastPublishedAt: null,
 				});
-				renderChannels();
+				renderTopics();
 			}
 
-			function applyChannelSubscribed(channelId) {
-				const ch = channels.get(channelId);
-				if (!ch) return;
-				channels.set(channelId, {
-					...ch,
-					subscriberCount: (ch.subscriberCount ?? 0) + 1,
+			function applyTopicSubscribed(topicId) {
+				const t = topics.get(topicId);
+				if (!t) return;
+				topics.set(topicId, {
+					...t,
+					subscriberCount: (t.subscriberCount ?? 0) + 1,
 				});
-				renderChannels();
+				renderTopics();
 			}
 
-			function applyChannelUnsubscribed(channelId) {
-				const ch = channels.get(channelId);
-				if (!ch) return;
-				channels.set(channelId, {
-					...ch,
-					subscriberCount: Math.max(0, (ch.subscriberCount ?? 0) - 1),
+			function applyTopicUnsubscribed(topicId) {
+				const t = topics.get(topicId);
+				if (!t) return;
+				topics.set(topicId, {
+					...t,
+					subscriberCount: Math.max(0, (t.subscriberCount ?? 0) - 1),
 				});
-				renderChannels();
+				renderTopics();
 			}
 
-			function applyChannelPublished(channelId, sentAt) {
-				const ch = channels.get(channelId);
-				if (!ch) return;
-				channels.set(channelId, { ...ch, lastPublishedAt: sentAt });
-				renderChannels();
+			function applyTopicPublished(topicId, sentAt) {
+				const t = topics.get(topicId);
+				if (!t) return;
+				topics.set(topicId, { ...t, lastPublishedAt: sentAt });
+				renderTopics();
 			}
 
-			async function loadInitialChannels() {
+			async function loadInitialTopics() {
 				try {
-					const res = await fetch("/api/list_channels", {
+					const res = await fetch("/api/list_topics", {
 						method: "POST",
 						headers: { "Content-Type": "application/json" },
 						body: "{}",
 					});
 					const json = await res.json();
 					if (!json?.success) return;
-					for (const ch of json.data?.channels ?? []) {
-						channels.set(ch.channelId, ch);
+					for (const t of json.data?.topics ?? []) {
+						topics.set(t.topicId, t);
 					}
-					renderChannels();
+					renderTopics();
 				} catch {
-					// 무시: SSE channel_created로 점진 복구
+					// 무시: SSE topic_created로 점진 복구
 				}
 			}
 
@@ -946,7 +946,7 @@
 				});
 				es.addEventListener("session_disconnected", (e) => {
 					const data = JSON.parse(e.data);
-					applyDisconnected(data.topicId);
+					applyDisconnected(data.peerId);
 					pushFlowMaybe(data);
 				});
 				es.addEventListener("message_sent", (e) => {
@@ -961,7 +961,7 @@
 				});
 				es.addEventListener("message_acked", (e) => {
 					const data = JSON.parse(e.data);
-					applyQueueDelta(data.topicId, -1);
+					applyQueueDelta(data.peerId, -1);
 					pushFlowMaybe(data);
 				});
 				es.addEventListener("message_redelivered", (e) => {
@@ -970,30 +970,30 @@
 				es.addEventListener("message_expired", (e) => {
 					pushFlowMaybe(JSON.parse(e.data));
 				});
-				es.addEventListener("channel_created", (e) => {
+				es.addEventListener("topic_created", (e) => {
 					const data = JSON.parse(e.data);
-					applyChannelCreated(data.channel);
+					applyTopicCreated(data.topic);
 					pushFlowMaybe(data);
 				});
-				es.addEventListener("channel_subscribed", (e) => {
+				es.addEventListener("topic_subscribed", (e) => {
 					const data = JSON.parse(e.data);
-					applyChannelSubscribed(data.channelId);
+					applyTopicSubscribed(data.topicId);
 					pushFlowMaybe(data);
 					if (
 						isDetailMode() &&
-						data.channelId === selectedContext.channelId &&
-						channelDetail
+						data.topicId === selectedContext.topicId &&
+						topicDetail
 					) {
-						const exists = channelDetail.subscribers.some(
-							(s) => s.topicId === data.topicId,
+						const exists = topicDetail.subscribers.some(
+							(s) => s.peerId === data.peerId,
 						);
 						if (!exists) {
-							channelDetail = {
-								...channelDetail,
+							topicDetail = {
+								...topicDetail,
 								subscribers: [
-									...channelDetail.subscribers,
+									...topicDetail.subscribers,
 									{
-										topicId: data.topicId,
+										peerId: data.peerId,
 										subscribedAt: data.at ?? new Date().toISOString(),
 										queueDepth: 0,
 										lastReadAt: null,
@@ -1005,39 +1005,39 @@
 						}
 					}
 				});
-				es.addEventListener("channel_unsubscribed", (e) => {
+				es.addEventListener("topic_unsubscribed", (e) => {
 					const data = JSON.parse(e.data);
-					applyChannelUnsubscribed(data.channelId);
+					applyTopicUnsubscribed(data.topicId);
 					pushFlowMaybe(data);
 					if (
 						isDetailMode() &&
-						data.channelId === selectedContext.channelId &&
-						channelDetail
+						data.topicId === selectedContext.topicId &&
+						topicDetail
 					) {
-						channelDetail = {
-							...channelDetail,
-							subscribers: channelDetail.subscribers.filter(
-								(s) => s.topicId !== data.topicId,
+						topicDetail = {
+							...topicDetail,
+							subscribers: topicDetail.subscribers.filter(
+								(s) => s.peerId !== data.peerId,
 							),
 						};
 						renderDetailHeader();
 						renderDetailSubscribers();
 					}
 				});
-				es.addEventListener("channel_message_published", (e) => {
+				es.addEventListener("topic_message_published", (e) => {
 					const data = JSON.parse(e.data);
-					applyChannelPublished(data.channelId, data.sentAt);
+					applyTopicPublished(data.topicId, data.sentAt);
 					pushFlowMaybe(data);
 					if (
 						isDetailMode() &&
-						data.channelId === selectedContext.channelId &&
-						channelDetail
+						data.topicId === selectedContext.topicId &&
+						topicDetail
 					) {
 						const delivered = data.deliveredTo ?? [];
-						channelDetail = {
-							...channelDetail,
-							subscribers: channelDetail.subscribers.map((s) =>
-								delivered.includes(s.topicId)
+						topicDetail = {
+							...topicDetail,
+							subscribers: topicDetail.subscribers.map((s) =>
+								delivered.includes(s.peerId)
 									? { ...s, queueDepth: s.queueDepth + 1 }
 									: s,
 							),
@@ -1050,7 +1050,7 @@
 			}
 
 			renderFlowHeader();
-			loadInitialChannels();
+			loadInitialTopics();
 			connect();
 		</script>
 	</body>
