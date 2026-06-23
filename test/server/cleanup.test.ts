@@ -35,15 +35,15 @@ describe("cleanup", () => {
 			ttlDays: 30,
 			dashboardUrl: "http://localhost",
 		});
-		broker.register({ topicId: "alice" });
-		broker.register({ topicId: "bob" });
+		broker.register({ peerId: "alice" });
+		broker.register({ peerId: "bob" });
 		const sent = broker.send({
 			from: "alice",
 			to: "bob",
 			subject: "s",
 			body: "b",
 		});
-		broker.read({ topicId: "bob" });
+		broker.read({ peerId: "bob" });
 
 		const redelivered: string[] = [];
 		broker.events.on("message_redelivered", (e: { messageId: string }) => {
@@ -66,8 +66,8 @@ describe("cleanup", () => {
 			ttlDays: -1,
 			dashboardUrl: "http://localhost",
 		});
-		broker.register({ topicId: "alice" });
-		broker.register({ topicId: "bob" });
+		broker.register({ peerId: "alice" });
+		broker.register({ peerId: "bob" });
 		const sent = broker.send({
 			from: "alice",
 			to: "bob",

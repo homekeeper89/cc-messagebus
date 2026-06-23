@@ -49,12 +49,12 @@ describe("http", () => {
 		const res = await server.app.inject({
 			method: "POST",
 			url: "/api/register",
-			payload: { topicId: "alice" },
+			payload: { peerId: "alice" },
 		});
 		assert.equal(res.statusCode, 200);
 		const body = res.json();
 		assert.equal(body.ok, true);
-		assert.equal(body.topicId, "alice");
+		assert.equal(body.peerId, "alice");
 		assert.ok(body.monitorCommand);
 	});
 
@@ -62,29 +62,29 @@ describe("http", () => {
 		await server.app.inject({
 			method: "POST",
 			url: "/api/register",
-			payload: { topicId: "alice" },
+			payload: { peerId: "alice" },
 		});
 		const res = await server.app.inject({
 			method: "POST",
 			url: "/api/register",
-			payload: { topicId: "alice" },
+			payload: { peerId: "alice" },
 		});
 		assert.equal(res.statusCode, 409);
 		const body = res.json();
 		assert.equal(body.ok, false);
-		assert.equal(body.error.code, "TOPIC_ALREADY_REGISTERED");
+		assert.equal(body.error.code, "PEER_ALREADY_REGISTERED");
 	});
 
 	test("POST /api/send empty subject returns 400 + VALIDATION_FAILED", async () => {
 		await server.app.inject({
 			method: "POST",
 			url: "/api/register",
-			payload: { topicId: "alice" },
+			payload: { peerId: "alice" },
 		});
 		await server.app.inject({
 			method: "POST",
 			url: "/api/register",
-			payload: { topicId: "bob" },
+			payload: { peerId: "bob" },
 		});
 		const res = await server.app.inject({
 			method: "POST",
@@ -101,12 +101,12 @@ describe("http", () => {
 		await server.app.inject({
 			method: "POST",
 			url: "/api/register",
-			payload: { topicId: "bob" },
+			payload: { peerId: "bob" },
 		});
 		const res = await server.app.inject({
 			method: "POST",
 			url: "/api/read",
-			payload: { topicId: "bob", max: 300 },
+			payload: { peerId: "bob", max: 300 },
 		});
 		assert.equal(res.statusCode, 400);
 		assert.equal(res.json().error.code, "VALIDATION_FAILED");
@@ -128,7 +128,7 @@ describe("http", () => {
 		await server.app.inject({
 			method: "POST",
 			url: "/api/register",
-			payload: { topicId: "alice" },
+			payload: { peerId: "alice" },
 		});
 		await server.app.inject({
 			method: "POST",
@@ -138,7 +138,7 @@ describe("http", () => {
 		await server.app.inject({
 			method: "POST",
 			url: "/api/register",
-			payload: { topicId: "bob" },
+			payload: { peerId: "bob" },
 		});
 		const res = await server.app.inject({
 			method: "POST",
@@ -149,60 +149,60 @@ describe("http", () => {
 		const body = res.json();
 		assert.equal(body.ok, true);
 		assert.equal(body.peers.length, 2);
-		assert.equal(body.peers[0].topicId, "alice");
+		assert.equal(body.peers[0].peerId, "alice");
 		assert.equal(typeof body.peers[0].lastActivityAt, "string");
-		assert.equal(body.peers[1].topicId, "bob");
+		assert.equal(body.peers[1].peerId, "bob");
 		assert.equal(body.peers[1].lastActivityAt, null);
 	});
 
-	test("POST /api/list_channels empty state returns []", async () => {
+	test("POST /api/list_topics empty state returns []", async () => {
 		const res = await server.app.inject({
 			method: "POST",
-			url: "/api/list_channels",
+			url: "/api/list_topics",
 			payload: {},
 		});
 		assert.equal(res.statusCode, 200);
 		const body = res.json();
 		assert.equal(body.ok, true);
-		assert.deepEqual(body.channels, []);
+		assert.deepEqual(body.topics, []);
 	});
 
-	test("POST /api/list_channels serializes lastPublishedAt as null for unused channel", async () => {
+	test("POST /api/list_topics serializes lastPublishedAt as null for unused topic", async () => {
 		await server.app.inject({
 			method: "POST",
 			url: "/api/register",
-			payload: { topicId: "alice" },
+			payload: { peerId: "alice" },
 		});
 		await server.app.inject({
 			method: "POST",
-			url: "/api/channel_create",
-			payload: { channelId: "general", createdBy: "alice" },
+			url: "/api/topic_create",
+			payload: { topicId: "general", createdBy: "alice" },
 		});
 		const res = await server.app.inject({
 			method: "POST",
-			url: "/api/list_channels",
+			url: "/api/list_topics",
 			payload: {},
 		});
 		assert.equal(res.statusCode, 200);
 		const body = res.json();
 		assert.equal(body.ok, true);
-		assert.equal(body.channels.length, 1);
-		assert.equal(body.channels[0].channelId, "general");
-		assert.equal(body.channels[0].createdBy, "alice");
-		assert.equal(body.channels[0].subscriberCount, 0);
-		assert.equal(body.channels[0].lastPublishedAt, null);
+		assert.equal(body.topics.length, 1);
+		assert.equal(body.topics[0].topicId, "general");
+		assert.equal(body.topics[0].createdBy, "alice");
+		assert.equal(body.topics[0].subscriberCount, 0);
+		assert.equal(body.topics[0].lastPublishedAt, null);
 	});
 
 	test("e2e: register/send/read/ack via HTTP", async () => {
 		await server.app.inject({
 			method: "POST",
 			url: "/api/register",
-			payload: { topicId: "alice" },
+			payload: { peerId: "alice" },
 		});
 		await server.app.inject({
 			method: "POST",
 			url: "/api/register",
-			payload: { topicId: "bob" },
+			payload: { peerId: "bob" },
 		});
 		const sendRes = await server.app.inject({
 			method: "POST",
@@ -216,7 +216,7 @@ describe("http", () => {
 		const readRes = await server.app.inject({
 			method: "POST",
 			url: "/api/read",
-			payload: { topicId: "bob" },
+			payload: { peerId: "bob" },
 		});
 		assert.equal(readRes.statusCode, 200);
 		assert.equal(readRes.json().messages.length, 1);
@@ -224,7 +224,7 @@ describe("http", () => {
 		const ackRes = await server.app.inject({
 			method: "POST",
 			url: "/api/ack",
-			payload: { topicId: "bob", messageId },
+			payload: { peerId: "bob", messageId },
 		});
 		assert.equal(ackRes.statusCode, 200);
 		assert.equal(ackRes.json().ok, true);
@@ -232,33 +232,33 @@ describe("http", () => {
 		const rereadRes = await server.app.inject({
 			method: "POST",
 			url: "/api/read",
-			payload: { topicId: "bob" },
+			payload: { peerId: "bob" },
 		});
 		assert.equal(rereadRes.json().messages.length, 0);
 	});
 
-	test("POST /api/unregister unknown topic returns 404 + TOPIC_NOT_FOUND", async () => {
+	test("POST /api/unregister unknown topic returns 404 + PEER_NOT_FOUND", async () => {
 		const res = await server.app.inject({
 			method: "POST",
 			url: "/api/unregister",
-			payload: { topicId: "ghost" },
+			payload: { peerId: "ghost" },
 		});
 		assert.equal(res.statusCode, 404);
 		const body = res.json();
 		assert.equal(body.ok, false);
-		assert.equal(body.error.code, "TOPIC_NOT_FOUND");
+		assert.equal(body.error.code, "PEER_NOT_FOUND");
 	});
 
 	test("POST /api/unregister purgeQueue=true drops messages", async () => {
 		await server.app.inject({
 			method: "POST",
 			url: "/api/register",
-			payload: { topicId: "alice" },
+			payload: { peerId: "alice" },
 		});
 		await server.app.inject({
 			method: "POST",
 			url: "/api/register",
-			payload: { topicId: "bob" },
+			payload: { peerId: "bob" },
 		});
 		await server.app.inject({
 			method: "POST",
@@ -268,7 +268,7 @@ describe("http", () => {
 		const res = await server.app.inject({
 			method: "POST",
 			url: "/api/unregister",
-			payload: { topicId: "bob", purgeQueue: true },
+			payload: { peerId: "bob", purgeQueue: true },
 		});
 		assert.equal(res.statusCode, 200);
 		assert.equal(res.json().purged, true);
@@ -276,7 +276,7 @@ describe("http", () => {
 		await server.app.inject({
 			method: "POST",
 			url: "/api/register",
-			payload: { topicId: "bob" },
+			payload: { peerId: "bob" },
 		});
 		const peers = await server.app.inject({
 			method: "POST",
@@ -285,7 +285,7 @@ describe("http", () => {
 		});
 		const bob = peers
 			.json()
-			.peers.find((p: { topicId: string }) => p.topicId === "bob");
+			.peers.find((p: { peerId: string }) => p.peerId === "bob");
 		assert.equal(bob.queueLength, 0);
 	});
 
@@ -293,12 +293,12 @@ describe("http", () => {
 		await server.app.inject({
 			method: "POST",
 			url: "/api/register",
-			payload: { topicId: "alice" },
+			payload: { peerId: "alice" },
 		});
 		await server.app.inject({
 			method: "POST",
 			url: "/api/register",
-			payload: { topicId: "bob" },
+			payload: { peerId: "bob" },
 		});
 		await server.app.inject({
 			method: "POST",
@@ -308,7 +308,7 @@ describe("http", () => {
 		const res = await server.app.inject({
 			method: "POST",
 			url: "/api/unregister",
-			payload: { topicId: "bob", purgeQueue: false },
+			payload: { peerId: "bob", purgeQueue: false },
 		});
 		assert.equal(res.statusCode, 200);
 		assert.equal(res.json().purged, false);
@@ -316,7 +316,7 @@ describe("http", () => {
 		await server.app.inject({
 			method: "POST",
 			url: "/api/register",
-			payload: { topicId: "bob" },
+			payload: { peerId: "bob" },
 		});
 		const peers = await server.app.inject({
 			method: "POST",
@@ -325,7 +325,7 @@ describe("http", () => {
 		});
 		const bob = peers
 			.json()
-			.peers.find((p: { topicId: string }) => p.topicId === "bob");
+			.peers.find((p: { peerId: string }) => p.peerId === "bob");
 		assert.equal(bob.queueLength, 1);
 	});
 
@@ -333,12 +333,12 @@ describe("http", () => {
 		await server.app.inject({
 			method: "POST",
 			url: "/api/register",
-			payload: { topicId: "alice" },
+			payload: { peerId: "alice" },
 		});
 		await server.app.inject({
 			method: "POST",
 			url: "/api/register",
-			payload: { topicId: "bob" },
+			payload: { peerId: "bob" },
 		});
 		await server.app.inject({
 			method: "POST",
@@ -367,146 +367,146 @@ describe("http", () => {
 		const read = await server.app.inject({
 			method: "POST",
 			url: "/api/read",
-			payload: { topicId: "bob" },
+			payload: { peerId: "bob" },
 		});
 		assert.equal(read.json().messages.length, 1);
 	});
 
-	test("POST /api/channel_create returns ok + channelId", async () => {
+	test("POST /api/topic_create returns ok + topicId", async () => {
 		await server.app.inject({
 			method: "POST",
 			url: "/api/register",
-			payload: { topicId: "alice" },
+			payload: { peerId: "alice" },
 		});
 		const res = await server.app.inject({
 			method: "POST",
-			url: "/api/channel_create",
-			payload: { channelId: "general", createdBy: "alice" },
+			url: "/api/topic_create",
+			payload: { topicId: "general", createdBy: "alice" },
 		});
 		assert.equal(res.statusCode, 200);
 		const body = res.json();
 		assert.equal(body.ok, true);
-		assert.equal(body.channel.channelId, "general");
-		assert.equal(body.channel.createdBy, "alice");
+		assert.equal(body.topic.topicId, "general");
+		assert.equal(body.topic.createdBy, "alice");
 	});
 
-	test("POST /api/channel_create duplicate returns 409 + CHANNEL_ALREADY_EXISTS", async () => {
+	test("POST /api/topic_create duplicate returns 409 + TOPIC_ALREADY_EXISTS", async () => {
 		await server.app.inject({
 			method: "POST",
 			url: "/api/register",
-			payload: { topicId: "alice" },
+			payload: { peerId: "alice" },
 		});
 		await server.app.inject({
 			method: "POST",
-			url: "/api/channel_create",
-			payload: { channelId: "general", createdBy: "alice" },
+			url: "/api/topic_create",
+			payload: { topicId: "general", createdBy: "alice" },
 		});
 		const res = await server.app.inject({
 			method: "POST",
-			url: "/api/channel_create",
-			payload: { channelId: "general", createdBy: "alice" },
+			url: "/api/topic_create",
+			payload: { topicId: "general", createdBy: "alice" },
 		});
 		assert.equal(res.statusCode, 409);
 		const body = res.json();
 		assert.equal(body.ok, false);
-		assert.equal(body.error.code, "CHANNEL_ALREADY_EXISTS");
+		assert.equal(body.error.code, "TOPIC_ALREADY_EXISTS");
 	});
 
-	test("POST /api/channel_create empty channelId returns 400 + VALIDATION_FAILED", async () => {
+	test("POST /api/topic_create empty topicId returns 400 + VALIDATION_FAILED", async () => {
 		await server.app.inject({
 			method: "POST",
 			url: "/api/register",
-			payload: { topicId: "alice" },
+			payload: { peerId: "alice" },
 		});
 		const res = await server.app.inject({
 			method: "POST",
-			url: "/api/channel_create",
-			payload: { channelId: "", createdBy: "alice" },
+			url: "/api/topic_create",
+			payload: { topicId: "", createdBy: "alice" },
 		});
 		assert.equal(res.statusCode, 400);
 		assert.equal(res.json().error.code, "VALIDATION_FAILED");
 	});
 
-	test("POST /api/channel_subscribe returns ok", async () => {
+	test("POST /api/topic_subscribe returns ok", async () => {
 		await server.app.inject({
 			method: "POST",
 			url: "/api/register",
-			payload: { topicId: "alice" },
+			payload: { peerId: "alice" },
 		});
 		await server.app.inject({
 			method: "POST",
 			url: "/api/register",
-			payload: { topicId: "bob" },
+			payload: { peerId: "bob" },
 		});
 		await server.app.inject({
 			method: "POST",
-			url: "/api/channel_create",
-			payload: { channelId: "general", createdBy: "alice" },
+			url: "/api/topic_create",
+			payload: { topicId: "general", createdBy: "alice" },
 		});
 		const res = await server.app.inject({
 			method: "POST",
-			url: "/api/channel_subscribe",
-			payload: { channelId: "general", topicId: "bob" },
+			url: "/api/topic_subscribe",
+			payload: { topicId: "general", peerId: "bob" },
 		});
 		assert.equal(res.statusCode, 200);
 		assert.equal(res.json().ok, true);
 	});
 
-	test("POST /api/channel_subscribe duplicate returns 409 + ALREADY_SUBSCRIBED", async () => {
+	test("POST /api/topic_subscribe duplicate returns 409 + ALREADY_SUBSCRIBED", async () => {
 		await server.app.inject({
 			method: "POST",
 			url: "/api/register",
-			payload: { topicId: "alice" },
+			payload: { peerId: "alice" },
 		});
 		await server.app.inject({
 			method: "POST",
 			url: "/api/register",
-			payload: { topicId: "bob" },
+			payload: { peerId: "bob" },
 		});
 		await server.app.inject({
 			method: "POST",
-			url: "/api/channel_create",
-			payload: { channelId: "general", createdBy: "alice" },
+			url: "/api/topic_create",
+			payload: { topicId: "general", createdBy: "alice" },
 		});
 		await server.app.inject({
 			method: "POST",
-			url: "/api/channel_subscribe",
-			payload: { channelId: "general", topicId: "bob" },
+			url: "/api/topic_subscribe",
+			payload: { topicId: "general", peerId: "bob" },
 		});
 		const res = await server.app.inject({
 			method: "POST",
-			url: "/api/channel_subscribe",
-			payload: { channelId: "general", topicId: "bob" },
+			url: "/api/topic_subscribe",
+			payload: { topicId: "general", peerId: "bob" },
 		});
 		assert.equal(res.statusCode, 409);
 		assert.equal(res.json().error.code, "ALREADY_SUBSCRIBED");
 	});
 
-	test("POST /api/channel_send fan-out delivers to N-1 subscribers", async () => {
-		for (const topicId of ["alice", "bob", "carol"]) {
+	test("POST /api/topic_send fan-out delivers to N-1 subscribers", async () => {
+		for (const peerId of ["alice", "bob", "carol"]) {
 			await server.app.inject({
 				method: "POST",
 				url: "/api/register",
-				payload: { topicId },
+				payload: { peerId },
 			});
 		}
 		await server.app.inject({
 			method: "POST",
-			url: "/api/channel_create",
-			payload: { channelId: "general", createdBy: "alice" },
+			url: "/api/topic_create",
+			payload: { topicId: "general", createdBy: "alice" },
 		});
-		for (const topicId of ["bob", "carol"]) {
+		for (const peerId of ["bob", "carol"]) {
 			await server.app.inject({
 				method: "POST",
-				url: "/api/channel_subscribe",
-				payload: { channelId: "general", topicId },
+				url: "/api/topic_subscribe",
+				payload: { topicId: "general", peerId },
 			});
 		}
 		const res = await server.app.inject({
 			method: "POST",
-			url: "/api/channel_send",
+			url: "/api/topic_send",
 			payload: {
-				channelId: "general",
+				topicId: "general",
 				from: "alice",
 				subject: "hello",
 				body: "world",
@@ -515,55 +515,55 @@ describe("http", () => {
 		assert.equal(res.statusCode, 200);
 		const body = res.json();
 		assert.equal(body.ok, true);
-		assert.ok(body.channelMessageId);
+		assert.ok(body.topicMessageId);
 		assert.equal(body.deliveredTo.length, 2);
 		assert.ok(body.deliveredTo.includes("bob"));
 		assert.ok(body.deliveredTo.includes("carol"));
 		assert.ok(!body.deliveredTo.includes("alice"));
 	});
 
-	test("POST /api/channel_send unknown channel returns 404 + CHANNEL_NOT_FOUND", async () => {
+	test("POST /api/topic_send unknown topic returns 404 + TOPIC_NOT_FOUND", async () => {
 		await server.app.inject({
 			method: "POST",
 			url: "/api/register",
-			payload: { topicId: "alice" },
+			payload: { peerId: "alice" },
 		});
 		const res = await server.app.inject({
 			method: "POST",
-			url: "/api/channel_send",
+			url: "/api/topic_send",
 			payload: {
-				channelId: "ghost",
+				topicId: "ghost",
 				from: "alice",
 				subject: "s",
 				body: "b",
 			},
 		});
 		assert.equal(res.statusCode, 404);
-		assert.equal(res.json().error.code, "CHANNEL_NOT_FOUND");
+		assert.equal(res.json().error.code, "TOPIC_NOT_FOUND");
 	});
 
-	test("POST /api/channel_unsubscribe returns ok + unsubscribedAt", async () => {
-		for (const topicId of ["alice", "bob"]) {
+	test("POST /api/topic_unsubscribe returns ok + unsubscribedAt", async () => {
+		for (const peerId of ["alice", "bob"]) {
 			await server.app.inject({
 				method: "POST",
 				url: "/api/register",
-				payload: { topicId },
+				payload: { peerId },
 			});
 		}
 		await server.app.inject({
 			method: "POST",
-			url: "/api/channel_create",
-			payload: { channelId: "general", createdBy: "alice" },
+			url: "/api/topic_create",
+			payload: { topicId: "general", createdBy: "alice" },
 		});
 		await server.app.inject({
 			method: "POST",
-			url: "/api/channel_subscribe",
-			payload: { channelId: "general", topicId: "bob" },
+			url: "/api/topic_subscribe",
+			payload: { topicId: "general", peerId: "bob" },
 		});
 		const res = await server.app.inject({
 			method: "POST",
-			url: "/api/channel_unsubscribe",
-			payload: { channelId: "general", topicId: "bob" },
+			url: "/api/topic_unsubscribe",
+			payload: { topicId: "general", peerId: "bob" },
 		});
 		assert.equal(res.statusCode, 200);
 		const body = res.json();
@@ -571,44 +571,44 @@ describe("http", () => {
 		assert.ok(body.unsubscribedAt);
 	});
 
-	test("POST /api/channel_unsubscribe without prior subscribe returns 404 + NOT_SUBSCRIBED", async () => {
-		for (const topicId of ["alice", "bob"]) {
+	test("POST /api/topic_unsubscribe without prior subscribe returns 404 + NOT_SUBSCRIBED", async () => {
+		for (const peerId of ["alice", "bob"]) {
 			await server.app.inject({
 				method: "POST",
 				url: "/api/register",
-				payload: { topicId },
+				payload: { peerId },
 			});
 		}
 		await server.app.inject({
 			method: "POST",
-			url: "/api/channel_create",
-			payload: { channelId: "general", createdBy: "alice" },
+			url: "/api/topic_create",
+			payload: { topicId: "general", createdBy: "alice" },
 		});
 		const res = await server.app.inject({
 			method: "POST",
-			url: "/api/channel_unsubscribe",
-			payload: { channelId: "general", topicId: "bob" },
+			url: "/api/topic_unsubscribe",
+			payload: { topicId: "general", peerId: "bob" },
 		});
 		assert.equal(res.statusCode, 404);
 		assert.equal(res.json().error.code, "NOT_SUBSCRIBED");
 	});
 
-	test("POST /api/channel_history returns messages DESC + hasMore=false on small set", async () => {
+	test("POST /api/topic_history returns messages DESC + hasMore=false on small set", async () => {
 		await server.app.inject({
 			method: "POST",
 			url: "/api/register",
-			payload: { topicId: "alice" },
+			payload: { peerId: "alice" },
 		});
 		await server.app.inject({
 			method: "POST",
-			url: "/api/channel_create",
-			payload: { channelId: "general", createdBy: "alice" },
+			url: "/api/topic_create",
+			payload: { topicId: "general", createdBy: "alice" },
 		});
 		await server.app.inject({
 			method: "POST",
-			url: "/api/channel_send",
+			url: "/api/topic_send",
 			payload: {
-				channelId: "general",
+				topicId: "general",
 				from: "alice",
 				subject: "s",
 				body: "b",
@@ -616,8 +616,8 @@ describe("http", () => {
 		});
 		const res = await server.app.inject({
 			method: "POST",
-			url: "/api/channel_history",
-			payload: { channelId: "general" },
+			url: "/api/topic_history",
+			payload: { topicId: "general" },
 		});
 		assert.equal(res.statusCode, 200);
 		const body = res.json();
@@ -627,63 +627,63 @@ describe("http", () => {
 		assert.ok(body.messages[0].expiresAt);
 	});
 
-	test("POST /api/channel_history with out-of-range limit returns 400 VALIDATION_FAILED", async () => {
+	test("POST /api/topic_history with out-of-range limit returns 400 VALIDATION_FAILED", async () => {
 		await server.app.inject({
 			method: "POST",
 			url: "/api/register",
-			payload: { topicId: "alice" },
+			payload: { peerId: "alice" },
 		});
 		await server.app.inject({
 			method: "POST",
-			url: "/api/channel_create",
-			payload: { channelId: "general", createdBy: "alice" },
+			url: "/api/topic_create",
+			payload: { topicId: "general", createdBy: "alice" },
 		});
 		const res = await server.app.inject({
 			method: "POST",
-			url: "/api/channel_history",
-			payload: { channelId: "general", limit: 999 },
+			url: "/api/topic_history",
+			payload: { topicId: "general", limit: 999 },
 		});
 		assert.equal(res.statusCode, 400);
 	});
 
-	test("POST /api/channel_detail unknown channel returns 404 CHANNEL_NOT_FOUND", async () => {
+	test("POST /api/topic_detail unknown topic returns 404 TOPIC_NOT_FOUND", async () => {
 		const res = await server.app.inject({
 			method: "POST",
-			url: "/api/channel_detail",
-			payload: { channelId: "ghost" },
+			url: "/api/topic_detail",
+			payload: { topicId: "ghost" },
 		});
 		assert.equal(res.statusCode, 404);
 		const body = res.json();
 		assert.equal(body.ok, false);
-		assert.equal(body.error.code, "CHANNEL_NOT_FOUND");
+		assert.equal(body.error.code, "TOPIC_NOT_FOUND");
 	});
 
-	test("POST /api/channel_detail returns subscribers with per-subscriber stats", async () => {
+	test("POST /api/topic_detail returns subscribers with per-subscriber stats", async () => {
 		await server.app.inject({
 			method: "POST",
 			url: "/api/register",
-			payload: { topicId: "alice" },
+			payload: { peerId: "alice" },
 		});
 		await server.app.inject({
 			method: "POST",
 			url: "/api/register",
-			payload: { topicId: "bob" },
+			payload: { peerId: "bob" },
 		});
 		await server.app.inject({
 			method: "POST",
-			url: "/api/channel_create",
-			payload: { channelId: "general", createdBy: "alice" },
+			url: "/api/topic_create",
+			payload: { topicId: "general", createdBy: "alice" },
 		});
 		await server.app.inject({
 			method: "POST",
-			url: "/api/channel_subscribe",
-			payload: { channelId: "general", topicId: "bob" },
+			url: "/api/topic_subscribe",
+			payload: { topicId: "general", peerId: "bob" },
 		});
 		await server.app.inject({
 			method: "POST",
-			url: "/api/channel_send",
+			url: "/api/topic_send",
 			payload: {
-				channelId: "general",
+				topicId: "general",
 				from: "alice",
 				subject: "s",
 				body: "b",
@@ -692,17 +692,17 @@ describe("http", () => {
 
 		const res = await server.app.inject({
 			method: "POST",
-			url: "/api/channel_detail",
-			payload: { channelId: "general" },
+			url: "/api/topic_detail",
+			payload: { topicId: "general" },
 		});
 		assert.equal(res.statusCode, 200);
 		const body = res.json();
 		assert.equal(body.ok, true);
-		assert.equal(body.channel.channelId, "general");
-		assert.equal(body.channel.createdBy, "alice");
-		assert.equal(body.channel.subscribers.length, 1);
-		const bob = body.channel.subscribers[0];
-		assert.equal(bob.topicId, "bob");
+		assert.equal(body.topic.topicId, "general");
+		assert.equal(body.topic.createdBy, "alice");
+		assert.equal(body.topic.subscribers.length, 1);
+		const bob = body.topic.subscribers[0];
+		assert.equal(bob.peerId, "bob");
 		assert.equal(bob.queueDepth, 1);
 		assert.equal(bob.lastReadAt, null);
 	});
@@ -759,7 +759,7 @@ describe("tail SSE", () => {
 		}
 	}
 
-	test("GET /tail/:topicId unknown topic returns 404", async () => {
+	test("GET /tail/:peerId unknown topic returns 404", async () => {
 		const res = await fetch(`${baseUrl}/tail/ghost`);
 		assert.equal(res.status, 404);
 		const body = (await res.json()) as {
@@ -767,19 +767,19 @@ describe("tail SSE", () => {
 			error: { code: string };
 		};
 		assert.equal(body.ok, false);
-		assert.equal(body.error.code, "TOPIC_NOT_FOUND");
+		assert.equal(body.error.code, "PEER_NOT_FOUND");
 	});
 
-	test("GET /tail/:topicId pushes message_delivered on send", async () => {
+	test("GET /tail/:peerId pushes message_delivered on send", async () => {
 		await fetch(`${baseUrl}/api/register`, {
 			method: "POST",
 			headers: { "content-type": "application/json" },
-			body: JSON.stringify({ topicId: "alice" }),
+			body: JSON.stringify({ peerId: "alice" }),
 		});
 		await fetch(`${baseUrl}/api/register`, {
 			method: "POST",
 			headers: { "content-type": "application/json" },
-			body: JSON.stringify({ topicId: "bob" }),
+			body: JSON.stringify({ peerId: "bob" }),
 		});
 
 		const controller = new AbortController();
@@ -826,26 +826,26 @@ describe("tail SSE", () => {
 		}
 	});
 
-	test("GET /tail/:topicId pushes message_delivered on channel_send fan-out", async () => {
+	test("GET /tail/:peerId pushes message_delivered on topic_send fan-out", async () => {
 		await fetch(`${baseUrl}/api/register`, {
 			method: "POST",
 			headers: { "content-type": "application/json" },
-			body: JSON.stringify({ topicId: "alice" }),
+			body: JSON.stringify({ peerId: "alice" }),
 		});
 		await fetch(`${baseUrl}/api/register`, {
 			method: "POST",
 			headers: { "content-type": "application/json" },
-			body: JSON.stringify({ topicId: "bob" }),
+			body: JSON.stringify({ peerId: "bob" }),
 		});
-		await fetch(`${baseUrl}/api/channel_create`, {
+		await fetch(`${baseUrl}/api/topic_create`, {
 			method: "POST",
 			headers: { "content-type": "application/json" },
-			body: JSON.stringify({ channelId: "ch-tail", createdBy: "alice" }),
+			body: JSON.stringify({ topicId: "ch-tail", createdBy: "alice" }),
 		});
-		await fetch(`${baseUrl}/api/channel_subscribe`, {
+		await fetch(`${baseUrl}/api/topic_subscribe`, {
 			method: "POST",
 			headers: { "content-type": "application/json" },
-			body: JSON.stringify({ channelId: "ch-tail", topicId: "bob" }),
+			body: JSON.stringify({ topicId: "ch-tail", peerId: "bob" }),
 		});
 
 		const controller = new AbortController();
@@ -861,14 +861,14 @@ describe("tail SSE", () => {
 
 			await readOneEvent(reader, decoder, (e) => e.type === "heartbeat");
 
-			await fetch(`${baseUrl}/api/channel_send`, {
+			await fetch(`${baseUrl}/api/topic_send`, {
 				method: "POST",
 				headers: { "content-type": "application/json" },
 				body: JSON.stringify({
-					channelId: "ch-tail",
+					topicId: "ch-tail",
 					from: "alice",
 					subject: "epic-update",
-					body: "channel fan-out test",
+					body: "topic fan-out test",
 				}),
 			});
 
@@ -890,11 +890,11 @@ describe("tail SSE", () => {
 		}
 	});
 
-	test("GET /tail/:topicId close marks peer disconnected", async () => {
+	test("GET /tail/:peerId close marks peer disconnected", async () => {
 		await fetch(`${baseUrl}/api/register`, {
 			method: "POST",
 			headers: { "content-type": "application/json" },
-			body: JSON.stringify({ topicId: "bob" }),
+			body: JSON.stringify({ peerId: "bob" }),
 		});
 
 		const controller = new AbortController();
@@ -918,9 +918,9 @@ describe("tail SSE", () => {
 			body: JSON.stringify({}),
 		});
 		const peersBody = (await peersRes.json()) as {
-			peers: { topicId: string; status: string }[];
+			peers: { peerId: string; status: string }[];
 		};
-		const bob = peersBody.peers.find((p) => p.topicId === "bob");
+		const bob = peersBody.peers.find((p) => p.peerId === "bob");
 		assert.ok(bob, "bob peer must exist");
 		assert.equal(bob.status, "disconnected");
 	});

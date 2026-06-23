@@ -35,16 +35,16 @@ describe("db", () => {
 
 	test("registerSession returns peer with status=connected", () => {
 		const peer = db.registerSession("saturn", "2026-06-18T00:00:00.000Z");
-		assert.equal(peer.topicId, "saturn");
+		assert.equal(peer.peerId, "saturn");
 		assert.equal(peer.status, "connected");
 		assert.equal(peer.queueLength, 0);
 	});
 
-	test("registerSession throws TOPIC_ALREADY_REGISTERED on duplicate connected", () => {
+	test("registerSession throws PEER_ALREADY_REGISTERED on duplicate connected", () => {
 		db.registerSession("saturn", "2026-06-18T00:00:00.000Z");
 		assert.throws(
 			() => db.registerSession("saturn", "2026-06-18T00:00:01.000Z"),
-			/TOPIC_ALREADY_REGISTERED/,
+			/PEER_ALREADY_REGISTERED/,
 		);
 	});
 
@@ -169,13 +169,13 @@ describe("db", () => {
 	});
 });
 
-describe("channels", () => {
+describe("topics", () => {
 	let tmpDir: string;
 	let dbPath: string;
 	let db: CcDatabase;
 
 	before(() => {
-		tmpDir = mkdtempSync(join(tmpdir(), "ccmb-ch-"));
+		tmpDir = mkdtempSync(join(tmpdir(), "ccmb-tp-"));
 		dbPath = join(tmpDir, "data.db");
 	});
 
@@ -190,39 +190,39 @@ describe("channels", () => {
 		db = openDatabase(dbPath);
 	});
 
-	test("createChannel inserts new channel and rejects duplicates", () => {
-		db.createChannel("epic-1", "saturn", "2026-06-19T00:00:00.000Z");
+	test("createTopic inserts new topic and rejects duplicates", () => {
+		db.createTopic("epic-1", "saturn", "2026-06-19T00:00:00.000Z");
 		assert.throws(
-			() => db.createChannel("epic-1", "saturn", "2026-06-19T00:00:01.000Z"),
-			/CHANNEL_ALREADY_EXISTS/,
+			() => db.createTopic("epic-1", "saturn", "2026-06-19T00:00:01.000Z"),
+			/TOPIC_ALREADY_EXISTS/,
 		);
 	});
 
-	test("subscribeChannel throws CHANNEL_NOT_FOUND for unknown channel", () => {
+	test("subscribeTopic throws TOPIC_NOT_FOUND for unknown topic", () => {
 		assert.throws(
-			() => db.subscribeChannel("nope", "saturn", "2026-06-19T00:00:00.000Z"),
-			/CHANNEL_NOT_FOUND/,
+			() => db.subscribeTopic("nope", "saturn", "2026-06-19T00:00:00.000Z"),
+			/TOPIC_NOT_FOUND/,
 		);
 	});
 
-	test("subscribeChannel throws ALREADY_SUBSCRIBED on duplicate", () => {
-		db.createChannel("epic-1", "saturn", "2026-06-19T00:00:00.000Z");
-		db.subscribeChannel("epic-1", "carme", "2026-06-19T00:00:01.000Z");
+	test("subscribeTopic throws ALREADY_SUBSCRIBED on duplicate", () => {
+		db.createTopic("epic-1", "saturn", "2026-06-19T00:00:00.000Z");
+		db.subscribeTopic("epic-1", "carme", "2026-06-19T00:00:01.000Z");
 		assert.throws(
-			() => db.subscribeChannel("epic-1", "carme", "2026-06-19T00:00:02.000Z"),
+			() => db.subscribeTopic("epic-1", "carme", "2026-06-19T00:00:02.000Z"),
 			/ALREADY_SUBSCRIBED/,
 		);
 	});
 
-	test("channelSend fans out to subscribers excluding sender", () => {
-		db.createChannel("epic-1", "saturn", "2026-06-19T00:00:00.000Z");
-		db.subscribeChannel("epic-1", "saturn", "2026-06-19T00:00:01.000Z");
-		db.subscribeChannel("epic-1", "carme", "2026-06-19T00:00:02.000Z");
-		db.subscribeChannel("epic-1", "europa", "2026-06-19T00:00:03.000Z");
+	test("topicSend fans out to subscribers excluding sender", () => {
+		db.createTopic("epic-1", "saturn", "2026-06-19T00:00:00.000Z");
+		db.subscribeTopic("epic-1", "saturn", "2026-06-19T00:00:01.000Z");
+		db.subscribeTopic("epic-1", "carme", "2026-06-19T00:00:02.000Z");
+		db.subscribeTopic("epic-1", "europa", "2026-06-19T00:00:03.000Z");
 
-		const result = db.channelSend({
-			channelMessageId: "cm-1",
-			channelId: "epic-1",
+		const result = db.topicSend({
+			topicMessageId: "cm-1",
+			topicId: "epic-1",
 			from: "saturn",
 			subject: "plan-update",
 			body: "hello",
@@ -241,12 +241,12 @@ describe("channels", () => {
 		assert.equal(db.fetchDeliverable("saturn", 10, now, inFlight).length, 0);
 	});
 
-	test("channelSend throws CHANNEL_NOT_FOUND for unknown channel", () => {
+	test("topicSend throws TOPIC_NOT_FOUND for unknown topic", () => {
 		assert.throws(
 			() =>
-				db.channelSend({
-					channelMessageId: "cm-1",
-					channelId: "nope",
+				db.topicSend({
+					topicMessageId: "cm-1",
+					topicId: "nope",
 					from: "saturn",
 					subject: "x",
 					body: "x",
@@ -254,19 +254,19 @@ describe("channels", () => {
 					expiresAt: "2026-07-19T00:00:00.000Z",
 					deliveryMessageIds: [],
 				}),
-			/CHANNEL_NOT_FOUND/,
+			/TOPIC_NOT_FOUND/,
 		);
 	});
 
-	test("channelSend rolls back canonical insert when deliveryMessageIds count mismatches", () => {
-		db.createChannel("epic-1", "saturn", "2026-06-19T00:00:00.000Z");
-		db.subscribeChannel("epic-1", "carme", "2026-06-19T00:00:01.000Z");
-		db.subscribeChannel("epic-1", "europa", "2026-06-19T00:00:02.000Z");
+	test("topicSend rolls back canonical insert when deliveryMessageIds count mismatches", () => {
+		db.createTopic("epic-1", "saturn", "2026-06-19T00:00:00.000Z");
+		db.subscribeTopic("epic-1", "carme", "2026-06-19T00:00:01.000Z");
+		db.subscribeTopic("epic-1", "europa", "2026-06-19T00:00:02.000Z");
 
 		assert.throws(() =>
-			db.channelSend({
-				channelMessageId: "cm-1",
-				channelId: "epic-1",
+			db.topicSend({
+				topicMessageId: "cm-1",
+				topicId: "epic-1",
 				from: "saturn",
 				subject: "x",
 				body: "x",
@@ -276,9 +276,9 @@ describe("channels", () => {
 			}),
 		);
 
-		const result = db.channelSend({
-			channelMessageId: "cm-1",
-			channelId: "epic-1",
+		const result = db.topicSend({
+			topicMessageId: "cm-1",
+			topicId: "epic-1",
 			from: "saturn",
 			subject: "x",
 			body: "x",
@@ -290,13 +290,13 @@ describe("channels", () => {
 	});
 
 	test("openDatabase is idempotent on existing db (backward-compatible ALTER)", () => {
-		db.createChannel("epic-1", "saturn", "2026-06-19T00:00:00.000Z");
+		db.createTopic("epic-1", "saturn", "2026-06-19T00:00:00.000Z");
 		db.close();
 		const db2 = openDatabase(dbPath);
 		assert.ok(db2);
 		assert.throws(
-			() => db2.createChannel("epic-1", "saturn", "2026-06-19T00:00:01.000Z"),
-			/CHANNEL_ALREADY_EXISTS/,
+			() => db2.createTopic("epic-1", "saturn", "2026-06-19T00:00:01.000Z"),
+			/TOPIC_ALREADY_EXISTS/,
 		);
 		db2.close();
 		db = openDatabase(dbPath);
