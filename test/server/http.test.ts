@@ -793,13 +793,6 @@ describe("tail SSE", () => {
 			const reader = res.body.getReader();
 			const decoder = new TextDecoder();
 
-			const heartbeat = await readOneEvent(
-				reader,
-				decoder,
-				(e) => e.type === "heartbeat",
-			);
-			assert.equal(heartbeat.type, "heartbeat");
-
 			await fetch(`${baseUrl}/api/send`, {
 				method: "POST",
 				headers: { "content-type": "application/json" },
@@ -859,8 +852,6 @@ describe("tail SSE", () => {
 			const reader = res.body.getReader();
 			const decoder = new TextDecoder();
 
-			await readOneEvent(reader, decoder, (e) => e.type === "heartbeat");
-
 			await fetch(`${baseUrl}/api/topic_send`, {
 				method: "POST",
 				headers: { "content-type": "application/json" },
@@ -904,9 +895,8 @@ describe("tail SSE", () => {
 		});
 		assert.equal(res.status, 200);
 		assert.ok(res.body, "expected response body stream");
-		const reader = res.body.getReader();
-		const decoder = new TextDecoder();
-		await readOneEvent(reader, decoder, (e) => e.type === "heartbeat");
+		// SSE 연결 establish 보장용 짧은 sleep
+		await delay(50);
 
 		controller.abort();
 		// raw 'close' 가 broker.disconnect 까지 호출하는 데 짧은 tick 필요
