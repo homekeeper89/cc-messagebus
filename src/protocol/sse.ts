@@ -7,6 +7,7 @@ import type {
 	TopicDto,
 	TopicId,
 	TopicMessageId,
+	TopicSummaryDto,
 } from "./http.js";
 
 export const TAIL_EVENT_TYPES = {
@@ -43,6 +44,7 @@ export const DASHBOARD_EVENT_TYPES = {
 export interface SessionSnapshotEvent {
 	type: "session_snapshot";
 	peers: PeerDto[];
+	topics: TopicSummaryDto[];
 	at: IsoTimestamp;
 }
 

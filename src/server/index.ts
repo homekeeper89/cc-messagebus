@@ -410,6 +410,7 @@ export function createServer(opts: ServerOptions): Server {
 			serializeSseEvent({
 				type: "session_snapshot",
 				peers: broker.listPeers().peers,
+				topics: broker.listTopics().topics,
 				at: new Date().toISOString(),
 			}),
 		);
