@@ -21,7 +21,6 @@ import {
 	DASHBOARD_EVENT_TYPES,
 	type DashboardEvent,
 	type MessageSentEvent,
-	SSE_HEARTBEAT_INTERVAL_SEC,
 	serializeSseEvent,
 } from "../protocol/sse.js";
 import {
@@ -310,12 +309,13 @@ export function createServer(opts: ServerOptions): Server {
 				Connection: "keep-alive",
 				"X-Accel-Buffering": "no",
 			});
+			// 첫 byte 가 없으면 클라이언트 fetch 가 headers 를 못 받아 timeout.
+			raw.flushHeaders();
 
 			let closed = false;
 			const cleanup = (): void => {
 				if (closed) return;
 				closed = true;
-				clearInterval(heartbeat);
 				broker.events.off("message_sent", listener);
 			};
 			// EPIPE 등 write 실패 시 cleanup 만 수행하고 throw 막음
@@ -327,13 +327,6 @@ export function createServer(opts: ServerOptions): Server {
 				}
 			};
 
-			safeWrite(
-				serializeSseEvent({
-					type: "heartbeat",
-					at: new Date().toISOString(),
-				}),
-			);
-
 			const listener = (event: MessageSentEvent): void => {
 				if (event.message.to !== peerId) return;
 				safeWrite(
@@ -344,16 +337,6 @@ export function createServer(opts: ServerOptions): Server {
 				);
 			};
 			broker.events.on("message_sent", listener);
-
-			const heartbeat = setInterval(() => {
-				safeWrite(
-					serializeSseEvent({
-						type: "heartbeat",
-						at: new Date().toISOString(),
-					}),
-				);
-			}, SSE_HEARTBEAT_INTERVAL_SEC * 1000);
-			heartbeat.unref();
 
 			raw.on("close", () => {
 				cleanup();
@@ -391,7 +374,6 @@ export function createServer(opts: ServerOptions): Server {
 		const cleanup = (): void => {
 			if (closed) return;
 			closed = true;
-			clearInterval(heartbeat);
 			for (const t of listened) broker.events.off(t, onEvent);
 		};
 		const safeWrite = (chunk: string): void => {
@@ -414,24 +396,8 @@ export function createServer(opts: ServerOptions): Server {
 				at: new Date().toISOString(),
 			}),
 		);
-		safeWrite(
-			serializeSseEvent({
-				type: "heartbeat",
-				at: new Date().toISOString(),
-			}),
-		);
 
 		for (const t of listened) broker.events.on(t, onEvent);
-
-		const heartbeat = setInterval(() => {
-			safeWrite(
-				serializeSseEvent({
-					type: "heartbeat",
-					at: new Date().toISOString(),
-				}),
-			);
-		}, SSE_HEARTBEAT_INTERVAL_SEC * 1000);
-		heartbeat.unref();
 
 		raw.on("close", () => {
 			cleanup();
