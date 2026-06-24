@@ -779,9 +779,9 @@
 						body: JSON.stringify({ topicId }),
 					});
 					const json = await res.json();
-					if (!json?.success) return;
+					if (!json?.ok) return;
 					if (!isDetailMode() || selectedContext.topicId !== topicId) return;
-					topicDetail = json.data?.topic ?? null;
+					topicDetail = json.topic ?? null;
 					renderDetailHeader();
 					renderDetailSubscribers();
 				} catch {
@@ -797,9 +797,9 @@
 						body: JSON.stringify({ topicId, limit: HISTORY_LIMIT }),
 					});
 					const json = await res.json();
-					if (!json?.success) return;
+					if (!json?.ok) return;
 					if (!isDetailMode() || selectedContext.topicId !== topicId) return;
-					topicHistory = json.data?.messages ?? [];
+					topicHistory = json.messages ?? [];
 					renderDetailHistory();
 				} catch {
 					// 무시
@@ -925,8 +925,8 @@
 						body: "{}",
 					});
 					const json = await res.json();
-					if (!json?.success) return;
-					for (const t of json.data?.topics ?? []) {
+					if (!json?.ok) return;
+					for (const t of json.topics ?? []) {
 						topics.set(t.topicId, t);
 					}
 					renderTopics();
