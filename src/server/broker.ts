@@ -4,32 +4,32 @@ import type { ErrorCode } from "../protocol/errors.js";
 import type {
 	AckRequest,
 	AckResponse,
-	ChannelCreateRequest,
-	ChannelCreateResponse,
-	ChannelDetailRequest,
-	ChannelDetailResponse,
-	ChannelDto,
-	ChannelHistoryRequest,
-	ChannelHistoryResponse,
-	ChannelMessageDto,
-	ChannelMessageId,
-	ChannelSendRequest,
-	ChannelSendResponse,
-	ChannelSubscribeRequest,
-	ChannelSubscribeResponse,
-	ChannelUnsubscribeRequest,
-	ChannelUnsubscribeResponse,
-	ListChannelsResponse,
 	ListPeersResponse,
+	ListTopicsResponse,
 	MessageDto,
 	MessageId,
+	PeerId,
 	ReadRequest,
 	ReadResponse,
 	RegisterRequest,
 	RegisterResponse,
 	SendRequest,
 	SendResponse,
-	TopicId,
+	TopicCreateRequest,
+	TopicCreateResponse,
+	TopicDetailRequest,
+	TopicDetailResponse,
+	TopicDto,
+	TopicHistoryRequest,
+	TopicHistoryResponse,
+	TopicMessageDto,
+	TopicMessageId,
+	TopicSendRequest,
+	TopicSendResponse,
+	TopicSubscribeRequest,
+	TopicSubscribeResponse,
+	TopicUnsubscribeRequest,
+	TopicUnsubscribeResponse,
 	UnregisterRequest,
 	UnregisterResponse,
 } from "../protocol/http.js";
@@ -58,21 +58,19 @@ export interface BrokerOptions {
 export interface Broker {
 	events: EventEmitter;
 	register: (req: RegisterRequest) => RegisterResponse;
-	unregister: (topicId: TopicId, req: UnregisterRequest) => UnregisterResponse;
+	unregister: (peerId: PeerId, req: UnregisterRequest) => UnregisterResponse;
 	send: (req: SendRequest) => SendResponse;
 	read: (req: ReadRequest) => ReadResponse;
 	ack: (req: AckRequest) => AckResponse;
 	listPeers: () => ListPeersResponse;
-	listChannels: () => ListChannelsResponse;
-	disconnect: (topicId: TopicId) => void;
-	channelCreate: (req: ChannelCreateRequest) => ChannelCreateResponse;
-	channelSubscribe: (req: ChannelSubscribeRequest) => ChannelSubscribeResponse;
-	channelSend: (req: ChannelSendRequest) => ChannelSendResponse;
-	channelUnsubscribe: (
-		req: ChannelUnsubscribeRequest,
-	) => ChannelUnsubscribeResponse;
-	channelHistory: (req: ChannelHistoryRequest) => ChannelHistoryResponse;
-	channelDetail: (req: ChannelDetailRequest) => ChannelDetailResponse;
+	listTopics: () => ListTopicsResponse;
+	disconnect: (peerId: PeerId) => void;
+	topicCreate: (req: TopicCreateRequest) => TopicCreateResponse;
+	topicSubscribe: (req: TopicSubscribeRequest) => TopicSubscribeResponse;
+	topicSend: (req: TopicSendRequest) => TopicSendResponse;
+	topicUnsubscribe: (req: TopicUnsubscribeRequest) => TopicUnsubscribeResponse;
+	topicHistory: (req: TopicHistoryRequest) => TopicHistoryResponse;
+	topicDetail: (req: TopicDetailRequest) => TopicDetailResponse;
 }
 
 const HISTORY_LIMIT_DEFAULT = 50;
@@ -110,37 +108,37 @@ export function createBroker(db: CcDatabase, opts: BrokerOptions): Broker {
 		const now = nowIso();
 		let peer: ReturnType<typeof db.registerSession>;
 		try {
-			peer = db.registerSession(req.topicId, now);
+			peer = db.registerSession(req.peerId, now);
 		} catch (e) {
-			if (e instanceof DbError && e.code === "TOPIC_ALREADY_REGISTERED") {
+			if (e instanceof DbError && e.code === "PEER_ALREADY_REGISTERED") {
 				throw new BrokerError(
-					"TOPIC_ALREADY_REGISTERED",
-					`topic '${req.topicId}' is already connected`,
+					"PEER_ALREADY_REGISTERED",
+					`peer '${req.peerId}' is already connected`,
 				);
 			}
 			throw e;
 		}
 		emit({ type: "session_registered", peer });
 		return {
-			topicId: req.topicId,
-			monitorCommand: `cc-messagebus tail ${req.topicId}`,
+			peerId: req.peerId,
+			monitorCommand: `cc-messagebus tail ${req.peerId}`,
 			dashboardUrl: opts.dashboardUrl,
 		};
 	}
 
 	function unregister(
-		topicId: string,
+		peerId: PeerId,
 		req: UnregisterRequest,
 	): UnregisterResponse {
-		const existing = db.getSession(topicId);
+		const existing = db.getSession(peerId);
 		if (!existing) {
 			throw new BrokerError(
-				"TOPIC_NOT_FOUND",
-				`topic '${topicId}' is not registered`,
+				"PEER_NOT_FOUND",
+				`peer '${peerId}' is not registered`,
 			);
 		}
-		const result = db.unregisterSession(topicId, req.purgeQueue ?? false);
-		emit({ type: "session_disconnected", topicId, at: nowIso() });
+		const result = db.unregisterSession(peerId, req.purgeQueue ?? false);
+		emit({ type: "session_disconnected", peerId, at: nowIso() });
 		return result;
 	}
 
@@ -148,15 +146,15 @@ export function createBroker(db: CcDatabase, opts: BrokerOptions): Broker {
 		const sender = db.getSession(req.from);
 		if (!sender) {
 			throw new BrokerError(
-				"TOPIC_NOT_FOUND",
-				`sender topic '${req.from}' is not registered`,
+				"PEER_NOT_FOUND",
+				`sender peer '${req.from}' is not registered`,
 			);
 		}
 		const target = db.getSession(req.to);
 		if (!target) {
 			throw new BrokerError(
 				"PEER_NOT_FOUND",
-				`target topic '${req.to}' is not registered`,
+				`target peer '${req.to}' is not registered`,
 			);
 		}
 		const now = nowIso();
@@ -180,24 +178,24 @@ export function createBroker(db: CcDatabase, opts: BrokerOptions): Broker {
 	}
 
 	function read(req: ReadRequest): ReadResponse {
-		const session = db.getSession(req.topicId);
+		const session = db.getSession(req.peerId);
 		if (!session) {
 			throw new BrokerError(
-				"TOPIC_NOT_FOUND",
-				`topic '${req.topicId}' is not registered`,
+				"PEER_NOT_FOUND",
+				`peer '${req.peerId}' is not registered`,
 			);
 		}
 		const now = nowIso();
 		const inFlightUntil = plusSeconds(now, opts.visibilityTimeoutSec);
 		const max = req.max ?? READ_MAX_DEFAULT;
-		const messages = db.fetchDeliverable(req.topicId, max, now, inFlightUntil);
-		db.touchLastSeen(req.topicId, now);
-		db.updateLastActivity(req.topicId, now);
+		const messages = db.fetchDeliverable(req.peerId, max, now, inFlightUntil);
+		db.touchLastSeen(req.peerId, now);
+		db.updateLastActivity(req.peerId, now);
 		for (const m of messages) {
 			emit({
 				type: "message_read",
 				messageId: m.id,
-				topicId: req.topicId,
+				peerId: req.peerId,
 				at: now,
 			});
 		}
@@ -205,23 +203,23 @@ export function createBroker(db: CcDatabase, opts: BrokerOptions): Broker {
 	}
 
 	function ack(req: AckRequest): AckResponse {
-		const session = db.getSession(req.topicId);
+		const session = db.getSession(req.peerId);
 		if (!session) {
 			throw new BrokerError(
-				"TOPIC_NOT_FOUND",
-				`topic '${req.topicId}' is not registered`,
+				"PEER_NOT_FOUND",
+				`peer '${req.peerId}' is not registered`,
 			);
 		}
 		const now = nowIso();
 		let ackedAt: string;
 		try {
-			ackedAt = db.ackMessage(req.topicId, req.messageId, now);
+			ackedAt = db.ackMessage(req.peerId, req.messageId, now);
 		} catch (e) {
 			if (e instanceof DbError) {
 				if (e.code === "MESSAGE_NOT_FOUND") {
 					throw new BrokerError(
 						"MESSAGE_NOT_FOUND",
-						`message '${req.messageId}' not found for topic '${req.topicId}'`,
+						`message '${req.messageId}' not found for peer '${req.peerId}'`,
 					);
 				}
 				if (e.code === "MESSAGE_NOT_IN_FLIGHT") {
@@ -233,12 +231,12 @@ export function createBroker(db: CcDatabase, opts: BrokerOptions): Broker {
 			}
 			throw e;
 		}
-		db.touchLastSeen(req.topicId, now);
-		db.updateLastActivity(req.topicId, now);
+		db.touchLastSeen(req.peerId, now);
+		db.updateLastActivity(req.peerId, now);
 		emit({
 			type: "message_acked",
 			messageId: req.messageId,
-			topicId: req.topicId,
+			peerId: req.peerId,
 			at: ackedAt,
 		});
 		return { ackedAt };
@@ -248,108 +246,106 @@ export function createBroker(db: CcDatabase, opts: BrokerOptions): Broker {
 		return { peers: db.listSessions() };
 	}
 
-	function listChannels(): ListChannelsResponse {
-		return { channels: db.listChannelSummaries() };
+	function listTopics(): ListTopicsResponse {
+		return { topics: db.listTopicSummaries() };
 	}
 
-	function disconnect(topicId: string): void {
-		const session = db.getSession(topicId);
+	function disconnect(peerId: PeerId): void {
+		const session = db.getSession(peerId);
 		if (!session) return;
 		const now = nowIso();
-		db.markDisconnected(topicId, now);
-		emit({ type: "session_disconnected", topicId, at: now });
+		db.markDisconnected(peerId, now);
+		emit({ type: "session_disconnected", peerId, at: now });
 	}
 
-	function channelCreate(req: ChannelCreateRequest): ChannelCreateResponse {
+	function topicCreate(req: TopicCreateRequest): TopicCreateResponse {
 		const creator = db.getSession(req.createdBy);
 		if (!creator) {
 			throw new BrokerError(
-				"TOPIC_NOT_FOUND",
-				`creator topic '${req.createdBy}' is not registered`,
+				"PEER_NOT_FOUND",
+				`creator peer '${req.createdBy}' is not registered`,
 			);
 		}
 		const now = nowIso();
 		try {
-			db.createChannel(req.channelId, req.createdBy, now);
+			db.createTopic(req.topicId, req.createdBy, now);
 		} catch (e) {
-			if (e instanceof DbError && e.code === "CHANNEL_ALREADY_EXISTS") {
+			if (e instanceof DbError && e.code === "TOPIC_ALREADY_EXISTS") {
 				throw new BrokerError(
-					"CHANNEL_ALREADY_EXISTS",
-					`channel '${req.channelId}' already exists`,
+					"TOPIC_ALREADY_EXISTS",
+					`topic '${req.topicId}' already exists`,
 				);
 			}
 			throw e;
 		}
-		const channel: ChannelDto = {
-			channelId: req.channelId,
+		const topic: TopicDto = {
+			topicId: req.topicId,
 			createdBy: req.createdBy,
 			createdAt: now,
 		};
 		db.touchLastSeen(req.createdBy, now);
-		emit({ type: "channel_created", channel });
-		return { channel };
+		emit({ type: "topic_created", topic });
+		return { topic };
 	}
 
-	function channelSubscribe(
-		req: ChannelSubscribeRequest,
-	): ChannelSubscribeResponse {
-		const subscriber = db.getSession(req.topicId);
+	function topicSubscribe(req: TopicSubscribeRequest): TopicSubscribeResponse {
+		const subscriber = db.getSession(req.peerId);
 		if (!subscriber) {
 			throw new BrokerError(
-				"TOPIC_NOT_FOUND",
-				`subscriber topic '${req.topicId}' is not registered`,
+				"PEER_NOT_FOUND",
+				`subscriber peer '${req.peerId}' is not registered`,
 			);
 		}
 		const now = nowIso();
 		try {
-			db.subscribeChannel(req.channelId, req.topicId, now);
+			db.subscribeTopic(req.topicId, req.peerId, now);
 		} catch (e) {
-			if (e instanceof DbError && e.code === "CHANNEL_NOT_FOUND") {
+			if (e instanceof DbError && e.code === "TOPIC_NOT_FOUND") {
 				throw new BrokerError(
-					"CHANNEL_NOT_FOUND",
-					`channel '${req.channelId}' not found`,
+					"TOPIC_NOT_FOUND",
+					`topic '${req.topicId}' not found`,
 				);
 			}
 			if (e instanceof DbError && e.code === "ALREADY_SUBSCRIBED") {
 				throw new BrokerError(
 					"ALREADY_SUBSCRIBED",
-					`topic '${req.topicId}' already subscribed to '${req.channelId}'`,
+					`peer '${req.peerId}' already subscribed to '${req.topicId}'`,
 				);
 			}
 			throw e;
 		}
-		db.touchLastSeen(req.topicId, now);
-		db.updateLastActivity(req.topicId, now);
+		db.touchLastSeen(req.peerId, now);
+		db.updateLastActivity(req.peerId, now);
 		emit({
-			type: "channel_subscribed",
-			channelId: req.channelId,
+			type: "topic_subscribed",
 			topicId: req.topicId,
+			peerId: req.peerId,
 			at: now,
 		});
 		return { subscribedAt: now };
 	}
 
-	function channelSend(req: ChannelSendRequest): ChannelSendResponse {
+	function topicSend(req: TopicSendRequest): TopicSendResponse {
 		const sender = db.getSession(req.from);
 		if (!sender) {
 			throw new BrokerError(
-				"TOPIC_NOT_FOUND",
-				`sender topic '${req.from}' is not registered`,
+				"PEER_NOT_FOUND",
+				`sender peer '${req.from}' is not registered`,
 			);
 		}
-		const allSubs = db.listChannelSubscribers(req.channelId);
+		const allSubs = db.listTopicSubscribers(req.topicId);
 		const deliverTo = allSubs.filter((s) => s !== req.from);
 		const now = nowIso();
 		const expiresAt = plusDays(now, opts.ttlDays);
-		const channelMessageId = randomUUID() as ChannelMessageId;
+		const topicMessageId = randomUUID() as TopicMessageId;
 		const deliveryMessageIds: MessageId[] = deliverTo.map(
 			() => randomUUID() as MessageId,
 		);
-		let result: { deliveredTo: TopicId[] };
+		let result: { deliveredTo: PeerId[] };
 		try {
-			result = db.channelSend({
-				channelMessageId,
-				channelId: req.channelId,
+			result = db.topicSend({
+				topicMessageId,
+				topicId: req.topicId,
 				from: req.from,
 				subject: req.subject,
 				body: req.body,
@@ -358,10 +354,10 @@ export function createBroker(db: CcDatabase, opts: BrokerOptions): Broker {
 				deliveryMessageIds,
 			});
 		} catch (e) {
-			if (e instanceof DbError && e.code === "CHANNEL_NOT_FOUND") {
+			if (e instanceof DbError && e.code === "TOPIC_NOT_FOUND") {
 				throw new BrokerError(
-					"CHANNEL_NOT_FOUND",
-					`channel '${req.channelId}' not found`,
+					"TOPIC_NOT_FOUND",
+					`topic '${req.topicId}' not found`,
 				);
 			}
 			throw e;
@@ -384,61 +380,61 @@ export function createBroker(db: CcDatabase, opts: BrokerOptions): Broker {
 			emit({ type: "message_sent", message: fanoutMessage });
 		});
 		emit({
-			type: "channel_message_published",
-			channelId: req.channelId,
-			channelMessageId,
+			type: "topic_message_published",
+			topicId: req.topicId,
+			topicMessageId,
 			from: req.from,
 			deliveredTo: result.deliveredTo,
 			sentAt: now,
 		});
 		return {
-			channelMessageId,
+			topicMessageId,
 			deliveredTo: result.deliveredTo,
 			sentAt: now,
 		};
 	}
 
-	function channelUnsubscribe(
-		req: ChannelUnsubscribeRequest,
-	): ChannelUnsubscribeResponse {
-		const subscriber = db.getSession(req.topicId);
+	function topicUnsubscribe(
+		req: TopicUnsubscribeRequest,
+	): TopicUnsubscribeResponse {
+		const subscriber = db.getSession(req.peerId);
 		if (!subscriber) {
 			throw new BrokerError(
-				"TOPIC_NOT_FOUND",
-				`subscriber topic '${req.topicId}' is not registered`,
+				"PEER_NOT_FOUND",
+				`subscriber peer '${req.peerId}' is not registered`,
 			);
 		}
 		const now = nowIso();
 		try {
-			db.unsubscribeChannel(req.channelId, req.topicId);
+			db.unsubscribeTopic(req.topicId, req.peerId);
 		} catch (e) {
-			if (e instanceof DbError && e.code === "CHANNEL_NOT_FOUND") {
+			if (e instanceof DbError && e.code === "TOPIC_NOT_FOUND") {
 				throw new BrokerError(
-					"CHANNEL_NOT_FOUND",
-					`channel '${req.channelId}' not found`,
+					"TOPIC_NOT_FOUND",
+					`topic '${req.topicId}' not found`,
 				);
 			}
 			if (e instanceof DbError && e.code === "NOT_SUBSCRIBED") {
 				throw new BrokerError(
 					"NOT_SUBSCRIBED",
-					`topic '${req.topicId}' is not subscribed to '${req.channelId}'`,
+					`peer '${req.peerId}' is not subscribed to '${req.topicId}'`,
 				);
 			}
 			throw e;
 		}
-		db.touchLastSeen(req.topicId, now);
+		db.touchLastSeen(req.peerId, now);
 		emit({
-			type: "channel_unsubscribed",
-			channelId: req.channelId,
+			type: "topic_unsubscribed",
 			topicId: req.topicId,
+			peerId: req.peerId,
 			at: now,
 		});
 		return { unsubscribedAt: now };
 	}
 
 	// PRD `channels.prd.md` "What We're NOT Building": ACL 없음 — 누구나 read 가능.
-	// `requireTopicId` 없이 anonymous 호출 허용은 의도된 정책.
-	function channelHistory(req: ChannelHistoryRequest): ChannelHistoryResponse {
+	// `requirePeerId` 없이 anonymous 호출 허용은 의도된 정책.
+	function topicHistory(req: TopicHistoryRequest): TopicHistoryResponse {
 		const requestedLimit = req.limit ?? HISTORY_LIMIT_DEFAULT;
 		if (requestedLimit < 1 || requestedLimit > HISTORY_LIMIT_MAX) {
 			throw new BrokerError(
@@ -446,32 +442,32 @@ export function createBroker(db: CcDatabase, opts: BrokerOptions): Broker {
 				`limit must be between 1 and ${HISTORY_LIMIT_MAX}`,
 			);
 		}
-		let rows: ReturnType<typeof db.fetchChannelHistory>;
+		let rows: ReturnType<typeof db.fetchTopicHistory>;
 		try {
-			rows = db.fetchChannelHistory(
-				req.channelId,
+			rows = db.fetchTopicHistory(
+				req.topicId,
 				requestedLimit,
 				req.beforeSentAt ?? null,
 			);
 		} catch (e) {
-			if (e instanceof DbError && e.code === "CHANNEL_NOT_FOUND") {
+			if (e instanceof DbError && e.code === "TOPIC_NOT_FOUND") {
 				throw new BrokerError(
-					"CHANNEL_NOT_FOUND",
-					`channel '${req.channelId}' not found`,
+					"TOPIC_NOT_FOUND",
+					`topic '${req.topicId}' not found`,
 				);
 			}
 			throw e;
 		}
 		const hasMore = rows.length > requestedLimit;
 		const trimmed = hasMore ? rows.slice(0, requestedLimit) : rows;
-		const messages: ChannelMessageDto[] = trimmed.map((row) => ({
-			channelMessageId: row.id as ChannelMessageId,
-			channelId: row.channel_id,
-			from: row.from_topic_id,
+		const messages: TopicMessageDto[] = trimmed.map((row) => ({
+			topicMessageId: row.id as TopicMessageId,
+			topicId: row.topic_id,
+			from: row.from_peer_id,
 			subject: row.subject,
 			body: row.body,
 			sentAt: row.sent_at,
-			// expiresAt 은 `channel_messages` 컬럼이 아니라 sent_at + ttlDays 로 derive.
+			// expiresAt 은 `topic_messages` 컬럼이 아니라 sent_at + ttlDays 로 derive.
 			// TTL 정책이 바뀌면 historic 메시지의 응답 expiresAt 도 함께 바뀐다 — 의도된 설계.
 			expiresAt: plusDays(row.sent_at, opts.ttlDays),
 		}));
@@ -479,21 +475,21 @@ export function createBroker(db: CcDatabase, opts: BrokerOptions): Broker {
 	}
 
 	// PRD `channels.prd.md` "What We're NOT Building": ACL 없음 — 누구나 read 가능.
-	// `requireTopicId` 없이 anonymous 호출 허용은 의도된 정책.
-	function channelDetail(req: ChannelDetailRequest): ChannelDetailResponse {
-		let detail: ReturnType<typeof db.fetchChannelDetail>;
+	// `requirePeerId` 없이 anonymous 호출 허용은 의도된 정책.
+	function topicDetail(req: TopicDetailRequest): TopicDetailResponse {
+		let detail: ReturnType<typeof db.fetchTopicDetail>;
 		try {
-			detail = db.fetchChannelDetail(req.channelId);
+			detail = db.fetchTopicDetail(req.topicId);
 		} catch (e) {
-			if (e instanceof DbError && e.code === "CHANNEL_NOT_FOUND") {
+			if (e instanceof DbError && e.code === "TOPIC_NOT_FOUND") {
 				throw new BrokerError(
-					"CHANNEL_NOT_FOUND",
-					`channel '${req.channelId}' not found`,
+					"TOPIC_NOT_FOUND",
+					`topic '${req.topicId}' not found`,
 				);
 			}
 			throw e;
 		}
-		return { channel: detail };
+		return { topic: detail };
 	}
 
 	return {
@@ -504,13 +500,13 @@ export function createBroker(db: CcDatabase, opts: BrokerOptions): Broker {
 		read,
 		ack,
 		listPeers,
-		listChannels,
+		listTopics,
 		disconnect,
-		channelCreate,
-		channelSubscribe,
-		channelSend,
-		channelUnsubscribe,
-		channelHistory,
-		channelDetail,
+		topicCreate,
+		topicSubscribe,
+		topicSend,
+		topicUnsubscribe,
+		topicHistory,
+		topicDetail,
 	};
 }

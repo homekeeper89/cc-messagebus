@@ -1,11 +1,11 @@
 import type { ApiResponse } from "./errors.js";
 
 export type IsoTimestamp = string;
-export type TopicId = string;
+export type PeerId = string;
 export type MessageId = string;
 export type ThreadId = string;
-export type ChannelId = string;
-export type ChannelMessageId = string;
+export type TopicId = string;
+export type TopicMessageId = string;
 
 export const SessionStatus = {
 	CONNECTED: "connected",
@@ -15,8 +15,8 @@ export type SessionStatus = (typeof SessionStatus)[keyof typeof SessionStatus];
 
 export interface MessageDto {
 	id: MessageId;
-	from: TopicId;
-	to: TopicId;
+	from: PeerId;
+	to: PeerId;
 	subject: string;
 	body: string;
 	threadId: ThreadId | null;
@@ -27,7 +27,7 @@ export interface MessageDto {
 }
 
 export interface PeerDto {
-	topicId: TopicId;
+	peerId: PeerId;
 	status: SessionStatus;
 	connectedAt: IsoTimestamp;
 	lastSeenAt: IsoTimestamp;
@@ -35,38 +35,38 @@ export interface PeerDto {
 	queueLength: number;
 }
 
-export interface ChannelDto {
-	channelId: ChannelId;
-	createdBy: TopicId;
+export interface TopicDto {
+	topicId: TopicId;
+	createdBy: PeerId;
 	createdAt: IsoTimestamp;
 }
 
-export interface ChannelSummaryDto {
-	channelId: ChannelId;
-	createdBy: TopicId;
+export interface TopicSummaryDto {
+	topicId: TopicId;
+	createdBy: PeerId;
 	createdAt: IsoTimestamp;
 	subscriberCount: number;
 	lastPublishedAt: IsoTimestamp | null;
 }
 
 export interface SubscriberDto {
-	topicId: TopicId;
+	peerId: PeerId;
 	subscribedAt: IsoTimestamp;
 	queueDepth: number;
 	lastReadAt: IsoTimestamp | null;
 }
 
-export interface ChannelDetailDto {
-	channelId: ChannelId;
-	createdBy: TopicId;
+export interface TopicDetailDto {
+	topicId: TopicId;
+	createdBy: PeerId;
 	createdAt: IsoTimestamp;
 	subscribers: SubscriberDto[];
 }
 
-export interface ChannelMessageDto {
-	channelMessageId: ChannelMessageId;
-	channelId: ChannelId;
-	from: TopicId;
+export interface TopicMessageDto {
+	topicMessageId: TopicMessageId;
+	topicId: TopicId;
+	from: PeerId;
 	subject: string;
 	body: string;
 	sentAt: IsoTimestamp;
@@ -80,26 +80,26 @@ export const HTTP_ENDPOINTS = {
 	read: { method: "POST", path: "/api/read" },
 	ack: { method: "POST", path: "/api/ack" },
 	listPeers: { method: "POST", path: "/api/list_peers" },
-	listChannels: { method: "POST", path: "/api/list_channels" },
-	channelCreate: { method: "POST", path: "/api/channel_create" },
-	channelSubscribe: { method: "POST", path: "/api/channel_subscribe" },
-	channelSend: { method: "POST", path: "/api/channel_send" },
-	channelUnsubscribe: { method: "POST", path: "/api/channel_unsubscribe" },
-	channelHistory: { method: "POST", path: "/api/channel_history" },
-	channelDetail: { method: "POST", path: "/api/channel_detail" },
+	listTopics: { method: "POST", path: "/api/list_topics" },
+	topicCreate: { method: "POST", path: "/api/topic_create" },
+	topicSubscribe: { method: "POST", path: "/api/topic_subscribe" },
+	topicSend: { method: "POST", path: "/api/topic_send" },
+	topicUnsubscribe: { method: "POST", path: "/api/topic_unsubscribe" },
+	topicHistory: { method: "POST", path: "/api/topic_history" },
+	topicDetail: { method: "POST", path: "/api/topic_detail" },
 } as const;
 
 export interface RegisterRequest {
-	topicId: TopicId;
+	peerId: PeerId;
 }
 export interface RegisterResponse {
-	topicId: TopicId;
+	peerId: PeerId;
 	monitorCommand: string;
 	dashboardUrl: string;
 }
 
 export interface UnregisterRequest {
-	topicId: TopicId;
+	peerId: PeerId;
 	purgeQueue?: boolean;
 }
 export interface UnregisterResponse {
@@ -107,8 +107,8 @@ export interface UnregisterResponse {
 }
 
 export interface SendRequest {
-	from: TopicId;
-	to: TopicId;
+	from: PeerId;
+	to: PeerId;
 	subject: string;
 	body: string;
 	threadId?: ThreadId;
@@ -119,7 +119,7 @@ export interface SendResponse {
 }
 
 export interface ReadRequest {
-	topicId: TopicId;
+	peerId: PeerId;
 	max?: number;
 }
 export interface ReadResponse {
@@ -127,7 +127,7 @@ export interface ReadResponse {
 }
 
 export interface AckRequest {
-	topicId: TopicId;
+	peerId: PeerId;
 	messageId: MessageId;
 }
 export interface AckResponse {
@@ -139,62 +139,62 @@ export interface ListPeersResponse {
 	peers: PeerDto[];
 }
 
-export type ListChannelsRequest = Record<string, never>;
-export interface ListChannelsResponse {
-	channels: ChannelSummaryDto[];
+export type ListTopicsRequest = Record<string, never>;
+export interface ListTopicsResponse {
+	topics: TopicSummaryDto[];
 }
 
-export interface ChannelCreateRequest {
-	channelId: ChannelId;
-	createdBy: TopicId;
-}
-export interface ChannelCreateResponse {
-	channel: ChannelDto;
-}
-
-export interface ChannelSubscribeRequest {
-	channelId: ChannelId;
+export interface TopicCreateRequest {
 	topicId: TopicId;
+	createdBy: PeerId;
 }
-export interface ChannelSubscribeResponse {
+export interface TopicCreateResponse {
+	topic: TopicDto;
+}
+
+export interface TopicSubscribeRequest {
+	topicId: TopicId;
+	peerId: PeerId;
+}
+export interface TopicSubscribeResponse {
 	subscribedAt: IsoTimestamp;
 }
 
-export interface ChannelSendRequest {
-	channelId: ChannelId;
-	from: TopicId;
+export interface TopicSendRequest {
+	topicId: TopicId;
+	from: PeerId;
 	subject: string;
 	body: string;
 }
-export interface ChannelSendResponse {
-	channelMessageId: ChannelMessageId;
-	deliveredTo: TopicId[];
+export interface TopicSendResponse {
+	topicMessageId: TopicMessageId;
+	deliveredTo: PeerId[];
 	sentAt: IsoTimestamp;
 }
 
-export interface ChannelUnsubscribeRequest {
-	channelId: ChannelId;
+export interface TopicUnsubscribeRequest {
 	topicId: TopicId;
+	peerId: PeerId;
 }
-export interface ChannelUnsubscribeResponse {
+export interface TopicUnsubscribeResponse {
 	unsubscribedAt: IsoTimestamp;
 }
 
-export interface ChannelHistoryRequest {
-	channelId: ChannelId;
+export interface TopicHistoryRequest {
+	topicId: TopicId;
 	limit?: number;
 	beforeSentAt?: IsoTimestamp;
 }
-export interface ChannelHistoryResponse {
-	messages: ChannelMessageDto[];
+export interface TopicHistoryResponse {
+	messages: TopicMessageDto[];
 	hasMore: boolean;
 }
 
-export interface ChannelDetailRequest {
-	channelId: ChannelId;
+export interface TopicDetailRequest {
+	topicId: TopicId;
 }
-export interface ChannelDetailResponse {
-	channel: ChannelDetailDto;
+export interface TopicDetailResponse {
+	topic: TopicDetailDto;
 }
 
 export type RegisterApiResponse = ApiResponse<RegisterResponse>;
@@ -203,11 +203,10 @@ export type SendApiResponse = ApiResponse<SendResponse>;
 export type ReadApiResponse = ApiResponse<ReadResponse>;
 export type AckApiResponse = ApiResponse<AckResponse>;
 export type ListPeersApiResponse = ApiResponse<ListPeersResponse>;
-export type ListChannelsApiResponse = ApiResponse<ListChannelsResponse>;
-export type ChannelCreateApiResponse = ApiResponse<ChannelCreateResponse>;
-export type ChannelSubscribeApiResponse = ApiResponse<ChannelSubscribeResponse>;
-export type ChannelSendApiResponse = ApiResponse<ChannelSendResponse>;
-export type ChannelUnsubscribeApiResponse =
-	ApiResponse<ChannelUnsubscribeResponse>;
-export type ChannelHistoryApiResponse = ApiResponse<ChannelHistoryResponse>;
-export type ChannelDetailApiResponse = ApiResponse<ChannelDetailResponse>;
+export type ListTopicsApiResponse = ApiResponse<ListTopicsResponse>;
+export type TopicCreateApiResponse = ApiResponse<TopicCreateResponse>;
+export type TopicSubscribeApiResponse = ApiResponse<TopicSubscribeResponse>;
+export type TopicSendApiResponse = ApiResponse<TopicSendResponse>;
+export type TopicUnsubscribeApiResponse = ApiResponse<TopicUnsubscribeResponse>;
+export type TopicHistoryApiResponse = ApiResponse<TopicHistoryResponse>;
+export type TopicDetailApiResponse = ApiResponse<TopicDetailResponse>;

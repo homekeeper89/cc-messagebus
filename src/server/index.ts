@@ -5,23 +5,22 @@ import Fastify, { type FastifyError, type FastifyInstance } from "fastify";
 import { type ErrorCode, errorCodeToHttpStatus } from "../protocol/errors.js";
 import {
 	type AckRequest,
-	type ChannelCreateRequest,
-	type ChannelDetailRequest,
-	type ChannelHistoryRequest,
-	type ChannelSendRequest,
-	type ChannelSubscribeRequest,
-	type ChannelUnsubscribeRequest,
 	HTTP_ENDPOINTS,
 	type ReadRequest,
 	type RegisterRequest,
 	type SendRequest,
+	type TopicCreateRequest,
+	type TopicDetailRequest,
+	type TopicHistoryRequest,
+	type TopicSendRequest,
+	type TopicSubscribeRequest,
+	type TopicUnsubscribeRequest,
 	type UnregisterRequest,
 } from "../protocol/http.js";
 import {
 	DASHBOARD_EVENT_TYPES,
 	type DashboardEvent,
 	type MessageSentEvent,
-	SSE_HEARTBEAT_INTERVAL_SEC,
 	serializeSseEvent,
 } from "../protocol/sse.js";
 import {
@@ -46,33 +45,33 @@ const DASHBOARD_HTML = readFileSync(
 	"utf8",
 );
 
-const TOPIC_ID_SCHEMA = { type: "string", minLength: 1, maxLength: 64 };
+const PEER_ID_SCHEMA = { type: "string", minLength: 1, maxLength: 64 };
 const SUBJECT_SCHEMA = { type: "string", minLength: 1, maxLength: 256 };
 const BODY_SCHEMA = { type: "string", maxLength: 65536 };
 const THREAD_ID_SCHEMA = { type: "string", maxLength: 64 };
 const MESSAGE_ID_SCHEMA = { type: "string", minLength: 1, maxLength: 64 };
-const CHANNEL_ID_SCHEMA = { type: "string", minLength: 1, maxLength: 64 };
+const TOPIC_ID_SCHEMA = { type: "string", minLength: 1, maxLength: 64 };
 
 const REGISTER_BODY = {
 	type: "object",
-	properties: { topicId: TOPIC_ID_SCHEMA },
-	required: ["topicId"],
+	properties: { peerId: PEER_ID_SCHEMA },
+	required: ["peerId"],
 	additionalProperties: false,
 };
 const UNREGISTER_BODY = {
 	type: "object",
 	properties: {
-		topicId: TOPIC_ID_SCHEMA,
+		peerId: PEER_ID_SCHEMA,
 		purgeQueue: { type: "boolean" },
 	},
-	required: ["topicId"],
+	required: ["peerId"],
 	additionalProperties: false,
 };
 const SEND_BODY = {
 	type: "object",
 	properties: {
-		from: TOPIC_ID_SCHEMA,
-		to: TOPIC_ID_SCHEMA,
+		from: PEER_ID_SCHEMA,
+		to: PEER_ID_SCHEMA,
 		subject: SUBJECT_SCHEMA,
 		body: BODY_SCHEMA,
 		threadId: THREAD_ID_SCHEMA,
@@ -83,19 +82,19 @@ const SEND_BODY = {
 const READ_BODY = {
 	type: "object",
 	properties: {
-		topicId: TOPIC_ID_SCHEMA,
+		peerId: PEER_ID_SCHEMA,
 		max: { type: "integer", minimum: 1, maximum: 200 },
 	},
-	required: ["topicId"],
+	required: ["peerId"],
 	additionalProperties: false,
 };
 const ACK_BODY = {
 	type: "object",
 	properties: {
-		topicId: TOPIC_ID_SCHEMA,
+		peerId: PEER_ID_SCHEMA,
 		messageId: MESSAGE_ID_SCHEMA,
 	},
-	required: ["topicId", "messageId"],
+	required: ["peerId", "messageId"],
 	additionalProperties: false,
 };
 const LIST_PEERS_BODY = {
@@ -103,64 +102,64 @@ const LIST_PEERS_BODY = {
 	properties: {},
 	additionalProperties: false,
 };
-const LIST_CHANNELS_BODY = {
+const LIST_TOPICS_BODY = {
 	type: "object",
 	properties: {},
 	additionalProperties: false,
 };
-const CHANNEL_CREATE_BODY = {
+const TOPIC_CREATE_BODY = {
 	type: "object",
 	properties: {
-		channelId: CHANNEL_ID_SCHEMA,
-		createdBy: TOPIC_ID_SCHEMA,
-	},
-	required: ["channelId", "createdBy"],
-	additionalProperties: false,
-};
-const CHANNEL_SUBSCRIBE_BODY = {
-	type: "object",
-	properties: {
-		channelId: CHANNEL_ID_SCHEMA,
 		topicId: TOPIC_ID_SCHEMA,
+		createdBy: PEER_ID_SCHEMA,
 	},
-	required: ["channelId", "topicId"],
+	required: ["topicId", "createdBy"],
 	additionalProperties: false,
 };
-const CHANNEL_SEND_BODY = {
+const TOPIC_SUBSCRIBE_BODY = {
 	type: "object",
 	properties: {
-		channelId: CHANNEL_ID_SCHEMA,
-		from: TOPIC_ID_SCHEMA,
+		topicId: TOPIC_ID_SCHEMA,
+		peerId: PEER_ID_SCHEMA,
+	},
+	required: ["topicId", "peerId"],
+	additionalProperties: false,
+};
+const TOPIC_SEND_BODY = {
+	type: "object",
+	properties: {
+		topicId: TOPIC_ID_SCHEMA,
+		from: PEER_ID_SCHEMA,
 		subject: SUBJECT_SCHEMA,
 		body: BODY_SCHEMA,
 	},
-	required: ["channelId", "from", "subject", "body"],
+	required: ["topicId", "from", "subject", "body"],
 	additionalProperties: false,
 };
-const CHANNEL_UNSUBSCRIBE_BODY = {
+const TOPIC_UNSUBSCRIBE_BODY = {
 	type: "object",
 	properties: {
-		channelId: CHANNEL_ID_SCHEMA,
 		topicId: TOPIC_ID_SCHEMA,
+		peerId: PEER_ID_SCHEMA,
 	},
-	required: ["channelId", "topicId"],
+	required: ["topicId", "peerId"],
 	additionalProperties: false,
 };
 const ISO_TIMESTAMP_SCHEMA = { type: "string", minLength: 1, maxLength: 64 };
-const CHANNEL_HISTORY_BODY = {
+const TOPIC_HISTORY_BODY = {
 	type: "object",
 	properties: {
-		channelId: CHANNEL_ID_SCHEMA,
+		topicId: TOPIC_ID_SCHEMA,
 		limit: { type: "integer", minimum: 1, maximum: HISTORY_LIMIT_MAX },
 		beforeSentAt: ISO_TIMESTAMP_SCHEMA,
 	},
-	required: ["channelId"],
+	required: ["topicId"],
 	additionalProperties: false,
 };
-const CHANNEL_DETAIL_BODY = {
+const TOPIC_DETAIL_BODY = {
 	type: "object",
-	properties: { channelId: CHANNEL_ID_SCHEMA },
-	required: ["channelId"],
+	properties: { topicId: TOPIC_ID_SCHEMA },
+	required: ["topicId"],
 	additionalProperties: false,
 };
 
@@ -218,7 +217,7 @@ export function createServer(opts: ServerOptions): Server {
 		{ schema: { body: UNREGISTER_BODY } },
 		async (req) => ({
 			ok: true,
-			...broker.unregister(req.body.topicId, req.body),
+			...broker.unregister(req.body.peerId, req.body),
 		}),
 	);
 
@@ -247,57 +246,57 @@ export function createServer(opts: ServerOptions): Server {
 	);
 
 	app.post(
-		HTTP_ENDPOINTS.listChannels.path,
-		{ schema: { body: LIST_CHANNELS_BODY } },
-		async () => ({ ok: true, ...broker.listChannels() }),
+		HTTP_ENDPOINTS.listTopics.path,
+		{ schema: { body: LIST_TOPICS_BODY } },
+		async () => ({ ok: true, ...broker.listTopics() }),
 	);
 
-	app.post<{ Body: ChannelCreateRequest }>(
-		HTTP_ENDPOINTS.channelCreate.path,
-		{ schema: { body: CHANNEL_CREATE_BODY } },
-		async (req) => ({ ok: true, ...broker.channelCreate(req.body) }),
+	app.post<{ Body: TopicCreateRequest }>(
+		HTTP_ENDPOINTS.topicCreate.path,
+		{ schema: { body: TOPIC_CREATE_BODY } },
+		async (req) => ({ ok: true, ...broker.topicCreate(req.body) }),
 	);
 
-	app.post<{ Body: ChannelSubscribeRequest }>(
-		HTTP_ENDPOINTS.channelSubscribe.path,
-		{ schema: { body: CHANNEL_SUBSCRIBE_BODY } },
-		async (req) => ({ ok: true, ...broker.channelSubscribe(req.body) }),
+	app.post<{ Body: TopicSubscribeRequest }>(
+		HTTP_ENDPOINTS.topicSubscribe.path,
+		{ schema: { body: TOPIC_SUBSCRIBE_BODY } },
+		async (req) => ({ ok: true, ...broker.topicSubscribe(req.body) }),
 	);
 
-	app.post<{ Body: ChannelSendRequest }>(
-		HTTP_ENDPOINTS.channelSend.path,
-		{ schema: { body: CHANNEL_SEND_BODY } },
-		async (req) => ({ ok: true, ...broker.channelSend(req.body) }),
+	app.post<{ Body: TopicSendRequest }>(
+		HTTP_ENDPOINTS.topicSend.path,
+		{ schema: { body: TOPIC_SEND_BODY } },
+		async (req) => ({ ok: true, ...broker.topicSend(req.body) }),
 	);
 
-	app.post<{ Body: ChannelUnsubscribeRequest }>(
-		HTTP_ENDPOINTS.channelUnsubscribe.path,
-		{ schema: { body: CHANNEL_UNSUBSCRIBE_BODY } },
-		async (req) => ({ ok: true, ...broker.channelUnsubscribe(req.body) }),
+	app.post<{ Body: TopicUnsubscribeRequest }>(
+		HTTP_ENDPOINTS.topicUnsubscribe.path,
+		{ schema: { body: TOPIC_UNSUBSCRIBE_BODY } },
+		async (req) => ({ ok: true, ...broker.topicUnsubscribe(req.body) }),
 	);
 
-	app.post<{ Body: ChannelHistoryRequest }>(
-		HTTP_ENDPOINTS.channelHistory.path,
-		{ schema: { body: CHANNEL_HISTORY_BODY } },
-		async (req) => ({ ok: true, ...broker.channelHistory(req.body) }),
+	app.post<{ Body: TopicHistoryRequest }>(
+		HTTP_ENDPOINTS.topicHistory.path,
+		{ schema: { body: TOPIC_HISTORY_BODY } },
+		async (req) => ({ ok: true, ...broker.topicHistory(req.body) }),
 	);
 
-	app.post<{ Body: ChannelDetailRequest }>(
-		HTTP_ENDPOINTS.channelDetail.path,
-		{ schema: { body: CHANNEL_DETAIL_BODY } },
-		async (req) => ({ ok: true, ...broker.channelDetail(req.body) }),
+	app.post<{ Body: TopicDetailRequest }>(
+		HTTP_ENDPOINTS.topicDetail.path,
+		{ schema: { body: TOPIC_DETAIL_BODY } },
+		async (req) => ({ ok: true, ...broker.topicDetail(req.body) }),
 	);
 
-	app.get<{ Params: { topicId: string } }>(
-		"/tail/:topicId",
+	app.get<{ Params: { peerId: string } }>(
+		"/tail/:peerId",
 		async (req, reply) => {
-			const { topicId } = req.params;
-			const session = db.getSession(topicId);
+			const { peerId } = req.params;
+			const session = db.getSession(peerId);
 			if (!session) {
-				const code: ErrorCode = "TOPIC_NOT_FOUND";
+				const code: ErrorCode = "PEER_NOT_FOUND";
 				reply.code(errorCodeToHttpStatus[code]).send({
 					ok: false,
-					error: { code, message: `topic '${topicId}' is not registered` },
+					error: { code, message: `peer '${peerId}' is not registered` },
 				});
 				return;
 			}
@@ -310,12 +309,13 @@ export function createServer(opts: ServerOptions): Server {
 				Connection: "keep-alive",
 				"X-Accel-Buffering": "no",
 			});
+			// 첫 byte 가 없으면 클라이언트 fetch 가 headers 를 못 받아 timeout.
+			raw.flushHeaders();
 
 			let closed = false;
 			const cleanup = (): void => {
 				if (closed) return;
 				closed = true;
-				clearInterval(heartbeat);
 				broker.events.off("message_sent", listener);
 			};
 			// EPIPE 등 write 실패 시 cleanup 만 수행하고 throw 막음
@@ -327,15 +327,8 @@ export function createServer(opts: ServerOptions): Server {
 				}
 			};
 
-			safeWrite(
-				serializeSseEvent({
-					type: "heartbeat",
-					at: new Date().toISOString(),
-				}),
-			);
-
 			const listener = (event: MessageSentEvent): void => {
-				if (event.message.to !== topicId) return;
+				if (event.message.to !== peerId) return;
 				safeWrite(
 					serializeSseEvent({
 						type: "message_delivered",
@@ -345,20 +338,10 @@ export function createServer(opts: ServerOptions): Server {
 			};
 			broker.events.on("message_sent", listener);
 
-			const heartbeat = setInterval(() => {
-				safeWrite(
-					serializeSseEvent({
-						type: "heartbeat",
-						at: new Date().toISOString(),
-					}),
-				);
-			}, SSE_HEARTBEAT_INTERVAL_SEC * 1000);
-			heartbeat.unref();
-
 			raw.on("close", () => {
 				cleanup();
 				try {
-					broker.disconnect(topicId);
+					broker.disconnect(peerId);
 				} catch (e) {
 					// 서버 shutdown 후 socket close 가 늦게 도착하면 db 가 닫혀있는 race 만 무시.
 					// 그 외 예외는 진짜 버그이므로 로깅하지 않고 다시 던져서 에러 핸들러에 노출.
@@ -391,7 +374,6 @@ export function createServer(opts: ServerOptions): Server {
 		const cleanup = (): void => {
 			if (closed) return;
 			closed = true;
-			clearInterval(heartbeat);
 			for (const t of listened) broker.events.off(t, onEvent);
 		};
 		const safeWrite = (chunk: string): void => {
@@ -410,27 +392,12 @@ export function createServer(opts: ServerOptions): Server {
 			serializeSseEvent({
 				type: "session_snapshot",
 				peers: broker.listPeers().peers,
-				at: new Date().toISOString(),
-			}),
-		);
-		safeWrite(
-			serializeSseEvent({
-				type: "heartbeat",
+				topics: broker.listTopics().topics,
 				at: new Date().toISOString(),
 			}),
 		);
 
 		for (const t of listened) broker.events.on(t, onEvent);
-
-		const heartbeat = setInterval(() => {
-			safeWrite(
-				serializeSseEvent({
-					type: "heartbeat",
-					at: new Date().toISOString(),
-				}),
-			);
-		}, SSE_HEARTBEAT_INTERVAL_SEC * 1000);
-		heartbeat.unref();
 
 		raw.on("close", () => {
 			cleanup();
