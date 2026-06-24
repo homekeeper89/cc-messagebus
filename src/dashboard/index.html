@@ -306,6 +306,7 @@
 			}
 			#detail .card-list li[data-kind="history"] {
 				grid-template-columns: auto auto 1fr;
+				cursor: pointer;
 			}
 			#detail .card-list li[data-kind="history"] .time {
 				color: var(--muted);
@@ -318,6 +319,21 @@
 				overflow: hidden;
 				text-overflow: ellipsis;
 				white-space: nowrap;
+			}
+			#detail .card-list li[data-kind="history"] pre {
+				display: none;
+				grid-column: 1 / -1;
+				margin: 6px 0 0;
+				padding: 8px;
+				background: rgba(255, 255, 255, 0.04);
+				border-radius: 4px;
+				white-space: pre-wrap;
+				word-break: break-all;
+				color: var(--text);
+				font-size: 12px;
+			}
+			#detail .card-list li[data-kind="history"][data-open="1"] pre {
+				display: block;
 			}
 		</style>
 	</head>
@@ -765,7 +781,12 @@
 						const subj = document.createElement("span");
 						subj.className = "subject";
 						subj.textContent = m.subject;
-						li.append(time, from, subj);
+						const detail = document.createElement("pre");
+						detail.textContent = JSON.stringify(m, null, 2);
+						li.append(time, from, subj, detail);
+						li.addEventListener("click", () => {
+							li.dataset.open = li.dataset.open === "1" ? "0" : "1";
+						});
 						return li;
 					}),
 				);
