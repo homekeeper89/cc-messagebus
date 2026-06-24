@@ -104,7 +104,7 @@ describe("events SSE", () => {
 		}
 	}
 
-	test("GET /events emits session_snapshot + heartbeat on connect", async () => {
+	test("GET /events emits session_snapshot on connect", async () => {
 		const controller = new AbortController();
 		try {
 			const res = await fetch(`${baseUrl}/events`, {
@@ -125,14 +125,6 @@ describe("events SSE", () => {
 			);
 			assert.deepEqual((snap as { peers: unknown[] }).peers, []);
 			assert.deepEqual((snap as { topics: unknown[] }).topics, []);
-
-			const hb = await readEvent(
-				reader,
-				decoder,
-				buf,
-				(e) => e.type === "heartbeat",
-			);
-			assert.equal(hb.type, "heartbeat");
 		} finally {
 			controller.abort();
 		}
@@ -150,7 +142,12 @@ describe("events SSE", () => {
 			const decoder = new TextDecoder();
 			const buf = { value: "" };
 
-			await readEvent(reader, decoder, buf, (e) => e.type === "heartbeat");
+			await readEvent(
+				reader,
+				decoder,
+				buf,
+				(e) => e.type === "session_snapshot",
+			);
 
 			await fetch(`${baseUrl}/api/register`, {
 				method: "POST",
@@ -194,7 +191,12 @@ describe("events SSE", () => {
 			const decoder = new TextDecoder();
 			const buf = { value: "" };
 
-			await readEvent(reader, decoder, buf, (e) => e.type === "heartbeat");
+			await readEvent(
+				reader,
+				decoder,
+				buf,
+				(e) => e.type === "session_snapshot",
+			);
 
 			const sendRes = await fetch(`${baseUrl}/api/send`, {
 				method: "POST",
@@ -275,7 +277,12 @@ describe("events SSE", () => {
 			const decoder = new TextDecoder();
 			const buf = { value: "" };
 
-			await readEvent(reader, decoder, buf, (e) => e.type === "heartbeat");
+			await readEvent(
+				reader,
+				decoder,
+				buf,
+				(e) => e.type === "session_snapshot",
+			);
 
 			await fetch(`${baseUrl}/api/topic_create`, {
 				method: "POST",

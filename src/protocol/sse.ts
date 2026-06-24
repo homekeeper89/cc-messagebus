@@ -12,18 +12,13 @@ import type {
 
 export const TAIL_EVENT_TYPES = {
 	messageDelivered: "message_delivered",
-	heartbeat: "heartbeat",
 } as const;
 
 export interface MessageDeliveredEvent {
 	type: "message_delivered";
 	message: MessageDto;
 }
-export interface TailHeartbeatEvent {
-	type: "heartbeat";
-	at: IsoTimestamp;
-}
-export type TailEvent = MessageDeliveredEvent | TailHeartbeatEvent;
+export type TailEvent = MessageDeliveredEvent;
 
 export const DASHBOARD_EVENT_TYPES = {
 	sessionSnapshot: "session_snapshot",
@@ -34,7 +29,6 @@ export const DASHBOARD_EVENT_TYPES = {
 	messageAcked: "message_acked",
 	messageRedelivered: "message_redelivered",
 	messageExpired: "message_expired",
-	heartbeat: "heartbeat",
 	topicCreated: "topic_created",
 	topicSubscribed: "topic_subscribed",
 	topicUnsubscribed: "topic_unsubscribed",
@@ -83,10 +77,6 @@ export interface MessageExpiredEvent {
 	messageId: MessageId;
 	at: IsoTimestamp;
 }
-export interface DashboardHeartbeatEvent {
-	type: "heartbeat";
-	at: IsoTimestamp;
-}
 
 export interface TopicCreatedEvent {
 	type: "topic_created";
@@ -122,13 +112,10 @@ export type DashboardEvent =
 	| MessageAckedEvent
 	| MessageRedeliveredEvent
 	| MessageExpiredEvent
-	| DashboardHeartbeatEvent
 	| TopicCreatedEvent
 	| TopicSubscribedEvent
 	| TopicUnsubscribedEvent
 	| TopicMessagePublishedEvent;
-
-export const SSE_HEARTBEAT_INTERVAL_SEC = 15;
 
 export function serializeSseEvent<T extends { type: string }>(
 	event: T,
