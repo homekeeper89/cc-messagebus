@@ -49,12 +49,10 @@ describe("dashboard html", () => {
 	test("dashboard html wires EventSource('/events')", async () => {
 		const res = await server.app.inject({ method: "GET", url: "/dashboard" });
 		assert.ok(res.body.includes('new EventSource("/events")'));
-		assert.ok(res.body.includes('addEventListener("channel_created"'));
-		assert.ok(res.body.includes('addEventListener("channel_subscribed"'));
-		assert.ok(res.body.includes('addEventListener("channel_unsubscribed"'));
-		assert.ok(
-			res.body.includes('addEventListener("channel_message_published"'),
-		);
+		assert.ok(res.body.includes('addEventListener("topic_created"'));
+		assert.ok(res.body.includes('addEventListener("topic_subscribed"'));
+		assert.ok(res.body.includes('addEventListener("topic_unsubscribed"'));
+		assert.ok(res.body.includes('addEventListener("topic_message_published"'));
 	});
 });
 
@@ -106,7 +104,7 @@ describe("events SSE", () => {
 		}
 	}
 
-	test("GET /events emits session_snapshot + heartbeat on connect", async () => {
+	test("GET /events emits session_snapshot on connect", async () => {
 		const controller = new AbortController();
 		try {
 			const res = await fetch(`${baseUrl}/events`, {
@@ -126,14 +124,7 @@ describe("events SSE", () => {
 				(e) => e.type === "session_snapshot",
 			);
 			assert.deepEqual((snap as { peers: unknown[] }).peers, []);
-
-			const hb = await readEvent(
-				reader,
-				decoder,
-				buf,
-				(e) => e.type === "heartbeat",
-			);
-			assert.equal(hb.type, "heartbeat");
+			assert.deepEqual((snap as { topics: unknown[] }).topics, []);
 		} finally {
 			controller.abort();
 		}
@@ -151,12 +142,17 @@ describe("events SSE", () => {
 			const decoder = new TextDecoder();
 			const buf = { value: "" };
 
-			await readEvent(reader, decoder, buf, (e) => e.type === "heartbeat");
+			await readEvent(
+				reader,
+				decoder,
+				buf,
+				(e) => e.type === "session_snapshot",
+			);
 
 			await fetch(`${baseUrl}/api/register`, {
 				method: "POST",
 				headers: { "content-type": "application/json" },
-				body: JSON.stringify({ topicId: "alice" }),
+				body: JSON.stringify({ peerId: "alice" }),
 			});
 
 			const evt = await readEvent(
@@ -165,8 +161,8 @@ describe("events SSE", () => {
 				buf,
 				(e) => e.type === "session_registered",
 			);
-			const peer = (evt as { peer: { topicId: string } }).peer;
-			assert.equal(peer.topicId, "alice");
+			const peer = (evt as { peer: { peerId: string } }).peer;
+			assert.equal(peer.peerId, "alice");
 		} finally {
 			controller.abort();
 		}
@@ -176,12 +172,12 @@ describe("events SSE", () => {
 		await fetch(`${baseUrl}/api/register`, {
 			method: "POST",
 			headers: { "content-type": "application/json" },
-			body: JSON.stringify({ topicId: "alice" }),
+			body: JSON.stringify({ peerId: "alice" }),
 		});
 		await fetch(`${baseUrl}/api/register`, {
 			method: "POST",
 			headers: { "content-type": "application/json" },
-			body: JSON.stringify({ topicId: "bob" }),
+			body: JSON.stringify({ peerId: "bob" }),
 		});
 
 		const controller = new AbortController();
@@ -195,7 +191,12 @@ describe("events SSE", () => {
 			const decoder = new TextDecoder();
 			const buf = { value: "" };
 
-			await readEvent(reader, decoder, buf, (e) => e.type === "heartbeat");
+			await readEvent(
+				reader,
+				decoder,
+				buf,
+				(e) => e.type === "session_snapshot",
+			);
 
 			const sendRes = await fetch(`${baseUrl}/api/send`, {
 				method: "POST",
@@ -224,7 +225,7 @@ describe("events SSE", () => {
 			await fetch(`${baseUrl}/api/read`, {
 				method: "POST",
 				headers: { "content-type": "application/json" },
-				body: JSON.stringify({ topicId: "bob" }),
+				body: JSON.stringify({ peerId: "bob" }),
 			});
 
 			const readEvt = await readEvent(
@@ -238,7 +239,7 @@ describe("events SSE", () => {
 			await fetch(`${baseUrl}/api/ack`, {
 				method: "POST",
 				headers: { "content-type": "application/json" },
-				body: JSON.stringify({ topicId: "bob", messageId }),
+				body: JSON.stringify({ peerId: "bob", messageId }),
 			});
 
 			const acked = await readEvent(
@@ -253,16 +254,16 @@ describe("events SSE", () => {
 		}
 	});
 
-	test("GET /events streams channel lifecycle (create → subscribe → send → unsubscribe)", async () => {
+	test("GET /events streams topic lifecycle (create → subscribe → send → unsubscribe)", async () => {
 		await fetch(`${baseUrl}/api/register`, {
 			method: "POST",
 			headers: { "content-type": "application/json" },
-			body: JSON.stringify({ topicId: "alice" }),
+			body: JSON.stringify({ peerId: "alice" }),
 		});
 		await fetch(`${baseUrl}/api/register`, {
 			method: "POST",
 			headers: { "content-type": "application/json" },
-			body: JSON.stringify({ topicId: "bob" }),
+			body: JSON.stringify({ peerId: "bob" }),
 		});
 
 		const controller = new AbortController();
@@ -276,56 +277,61 @@ describe("events SSE", () => {
 			const decoder = new TextDecoder();
 			const buf = { value: "" };
 
-			await readEvent(reader, decoder, buf, (e) => e.type === "heartbeat");
+			await readEvent(
+				reader,
+				decoder,
+				buf,
+				(e) => e.type === "session_snapshot",
+			);
 
-			await fetch(`${baseUrl}/api/channel_create`, {
+			await fetch(`${baseUrl}/api/topic_create`, {
 				method: "POST",
 				headers: { "content-type": "application/json" },
-				body: JSON.stringify({ channelId: "#general", createdBy: "alice" }),
+				body: JSON.stringify({ topicId: "#general", createdBy: "alice" }),
 			});
 
 			const created = await readEvent(
 				reader,
 				decoder,
 				buf,
-				(e) => e.type === "channel_created",
+				(e) => e.type === "topic_created",
 			);
-			const channel = (created as { channel: { channelId: string } }).channel;
-			assert.equal(channel.channelId, "#general");
+			const topic = (created as { topic: { topicId: string } }).topic;
+			assert.equal(topic.topicId, "#general");
 
-			await fetch(`${baseUrl}/api/channel_subscribe`, {
+			await fetch(`${baseUrl}/api/topic_subscribe`, {
 				method: "POST",
 				headers: { "content-type": "application/json" },
-				body: JSON.stringify({ channelId: "#general", topicId: "alice" }),
+				body: JSON.stringify({ topicId: "#general", peerId: "alice" }),
 			});
 			const subA = await readEvent(
 				reader,
 				decoder,
 				buf,
-				(e) => e.type === "channel_subscribed",
+				(e) => e.type === "topic_subscribed",
 			);
-			assert.equal((subA as { topicId: string }).topicId, "alice");
+			assert.equal((subA as { peerId: string }).peerId, "alice");
 
-			await fetch(`${baseUrl}/api/channel_subscribe`, {
+			await fetch(`${baseUrl}/api/topic_subscribe`, {
 				method: "POST",
 				headers: { "content-type": "application/json" },
-				body: JSON.stringify({ channelId: "#general", topicId: "bob" }),
+				body: JSON.stringify({ topicId: "#general", peerId: "bob" }),
 			});
 			const subB = await readEvent(
 				reader,
 				decoder,
 				buf,
 				(e) =>
-					e.type === "channel_subscribed" &&
-					(e as { topicId: string }).topicId === "bob",
+					e.type === "topic_subscribed" &&
+					(e as { peerId: string }).peerId === "bob",
 			);
-			assert.equal((subB as { topicId: string }).topicId, "bob");
+			assert.equal((subB as { peerId: string }).peerId, "bob");
 
-			await fetch(`${baseUrl}/api/channel_send`, {
+			await fetch(`${baseUrl}/api/topic_send`, {
 				method: "POST",
 				headers: { "content-type": "application/json" },
 				body: JSON.stringify({
-					channelId: "#general",
+					topicId: "#general",
 					from: "alice",
 					subject: "hello",
 					body: "hi all",
@@ -336,29 +342,29 @@ describe("events SSE", () => {
 				reader,
 				decoder,
 				buf,
-				(e) => e.type === "channel_message_published",
+				(e) => e.type === "topic_message_published",
 			);
 			const pub = published as {
 				from: string;
 				deliveredTo: string[];
-				channelId: string;
+				topicId: string;
 			};
 			assert.equal(pub.from, "alice");
-			assert.equal(pub.channelId, "#general");
+			assert.equal(pub.topicId, "#general");
 			assert.deepEqual(pub.deliveredTo, ["bob"]);
 
-			await fetch(`${baseUrl}/api/channel_unsubscribe`, {
+			await fetch(`${baseUrl}/api/topic_unsubscribe`, {
 				method: "POST",
 				headers: { "content-type": "application/json" },
-				body: JSON.stringify({ channelId: "#general", topicId: "bob" }),
+				body: JSON.stringify({ topicId: "#general", peerId: "bob" }),
 			});
 			const unsub = await readEvent(
 				reader,
 				decoder,
 				buf,
-				(e) => e.type === "channel_unsubscribed",
+				(e) => e.type === "topic_unsubscribed",
 			);
-			assert.equal((unsub as { topicId: string }).topicId, "bob");
+			assert.equal((unsub as { peerId: string }).peerId, "bob");
 		} finally {
 			controller.abort();
 		}
@@ -368,7 +374,7 @@ describe("events SSE", () => {
 		await fetch(`${baseUrl}/api/register`, {
 			method: "POST",
 			headers: { "content-type": "application/json" },
-			body: JSON.stringify({ topicId: "alice" }),
+			body: JSON.stringify({ peerId: "alice" }),
 		});
 
 		const controller = new AbortController();
@@ -388,9 +394,46 @@ describe("events SSE", () => {
 				buf,
 				(e) => e.type === "session_snapshot",
 			);
-			const peers = (snap as { peers: { topicId: string }[] }).peers;
+			const peers = (snap as { peers: { peerId: string }[] }).peers;
 			assert.equal(peers.length, 1);
-			assert.equal(peers[0].topicId, "alice");
+			assert.equal(peers[0].peerId, "alice");
+		} finally {
+			controller.abort();
+		}
+	});
+
+	test("late connect snapshot includes existing topics", async () => {
+		await fetch(`${baseUrl}/api/register`, {
+			method: "POST",
+			headers: { "content-type": "application/json" },
+			body: JSON.stringify({ peerId: "alice" }),
+		});
+		await fetch(`${baseUrl}/api/topic_create`, {
+			method: "POST",
+			headers: { "content-type": "application/json" },
+			body: JSON.stringify({ topicId: "#general", createdBy: "alice" }),
+		});
+
+		const controller = new AbortController();
+		try {
+			const res = await fetch(`${baseUrl}/events`, {
+				signal: controller.signal,
+				headers: { Accept: "text/event-stream" },
+			});
+			assert.ok(res.body);
+			const reader = res.body.getReader();
+			const decoder = new TextDecoder();
+			const buf = { value: "" };
+
+			const snap = await readEvent(
+				reader,
+				decoder,
+				buf,
+				(e) => e.type === "session_snapshot",
+			);
+			const topics = (snap as { topics: { topicId: string }[] }).topics;
+			assert.equal(topics.length, 1);
+			assert.equal(topics[0].topicId, "#general");
 		} finally {
 			controller.abort();
 		}

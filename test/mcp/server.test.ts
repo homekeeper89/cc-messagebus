@@ -6,7 +6,7 @@ import {
 } from "../../src/mcp/broker-client.js";
 import { buildToolList, dispatch } from "../../src/mcp/server.js";
 import type { SpawnCmd } from "../../src/mcp/spawn.js";
-import { clearTopicId, peekTopicId } from "../../src/mcp/state.js";
+import { clearPeerId, peekPeerId } from "../../src/mcp/state.js";
 import {
 	MCP_INPUT_SCHEMAS,
 	MCP_TOOL_DESCRIPTIONS,
@@ -15,28 +15,28 @@ import {
 } from "../../src/protocol/mcp.js";
 
 interface CallLog {
-	register: { topicId: string }[];
-	unregister: { topicId: string; purgeQueue?: boolean }[];
+	register: { peerId: string }[];
+	unregister: { peerId: string; purgeQueue?: boolean }[];
 	send: { from: string; to: string; subject: string; body: string }[];
-	read: { topicId: string; max?: number }[];
-	ack: { topicId: string; messageId: string }[];
+	read: { peerId: string; max?: number }[];
+	ack: { peerId: string; messageId: string }[];
 	listPeers: number;
-	listChannels: number;
-	channelCreate: { channelId: string; createdBy: string }[];
-	channelSubscribe: { channelId: string; topicId: string }[];
-	channelSend: {
-		channelId: string;
+	listTopics: number;
+	topicCreate: { topicId: string; createdBy: string }[];
+	topicSubscribe: { topicId: string; peerId: string }[];
+	topicSend: {
+		topicId: string;
 		from: string;
 		subject: string;
 		body: string;
 	}[];
-	channelUnsubscribe: { channelId: string; topicId: string }[];
-	channelHistory: {
-		channelId: string;
+	topicUnsubscribe: { topicId: string; peerId: string }[];
+	topicHistory: {
+		topicId: string;
 		limit?: number;
 		beforeSentAt?: string;
 	}[];
-	channelDetail: { channelId: string }[];
+	topicDetail: { topicId: string }[];
 }
 
 function makeMockClient(overrides: Partial<BrokerClient> = {}): {
@@ -50,20 +50,20 @@ function makeMockClient(overrides: Partial<BrokerClient> = {}): {
 		read: [],
 		ack: [],
 		listPeers: 0,
-		listChannels: 0,
-		channelCreate: [],
-		channelSubscribe: [],
-		channelSend: [],
-		channelUnsubscribe: [],
-		channelHistory: [],
-		channelDetail: [],
+		listTopics: 0,
+		topicCreate: [],
+		topicSubscribe: [],
+		topicSend: [],
+		topicUnsubscribe: [],
+		topicHistory: [],
+		topicDetail: [],
 	};
 	const client: BrokerClient = {
 		register: async (req) => {
 			calls.register.push(req);
 			return {
-				topicId: req.topicId,
-				monitorCommand: `cc-messagebus tail ${req.topicId}`,
+				peerId: req.peerId,
+				monitorCommand: `cc-messagebus tail ${req.peerId}`,
 				dashboardUrl: "http://127.0.0.1:5959/dashboard",
 			};
 		},
@@ -87,45 +87,45 @@ function makeMockClient(overrides: Partial<BrokerClient> = {}): {
 			calls.listPeers += 1;
 			return { peers: [] };
 		},
-		listChannels: async () => {
-			calls.listChannels += 1;
-			return { channels: [] };
+		listTopics: async () => {
+			calls.listTopics += 1;
+			return { topics: [] };
 		},
-		channelCreate: async (req) => {
-			calls.channelCreate.push(req);
+		topicCreate: async (req) => {
+			calls.topicCreate.push(req);
 			return {
-				channel: {
-					channelId: req.channelId,
+				topic: {
+					topicId: req.topicId,
 					createdBy: req.createdBy,
 					createdAt: "2026-06-18T00:00:00.000Z",
 				},
 			};
 		},
-		channelSubscribe: async (req) => {
-			calls.channelSubscribe.push(req);
+		topicSubscribe: async (req) => {
+			calls.topicSubscribe.push(req);
 			return { subscribedAt: "2026-06-18T00:00:00.000Z" };
 		},
-		channelSend: async (req) => {
-			calls.channelSend.push(req);
+		topicSend: async (req) => {
+			calls.topicSend.push(req);
 			return {
-				channelMessageId: "ch-msg-1",
+				topicMessageId: "ch-msg-1",
 				deliveredTo: [],
 				sentAt: "2026-06-18T00:00:00.000Z",
 			};
 		},
-		channelUnsubscribe: async (req) => {
-			calls.channelUnsubscribe.push(req);
+		topicUnsubscribe: async (req) => {
+			calls.topicUnsubscribe.push(req);
 			return { unsubscribedAt: "2026-06-18T00:00:00.000Z" };
 		},
-		channelHistory: async (req) => {
-			calls.channelHistory.push(req);
+		topicHistory: async (req) => {
+			calls.topicHistory.push(req);
 			return { messages: [], hasMore: false };
 		},
-		channelDetail: async (req) => {
-			calls.channelDetail.push(req);
+		topicDetail: async (req) => {
+			calls.topicDetail.push(req);
 			return {
-				channel: {
-					channelId: req.channelId,
+				topic: {
+					topicId: req.topicId,
 					createdBy: "alice",
 					createdAt: "2026-06-18T00:00:00.000Z",
 					subscribers: [],
@@ -155,22 +155,22 @@ describe("mcp/server.buildToolList", () => {
 
 describe("mcp/server.dispatch", () => {
 	beforeEach(() => {
-		clearTopicId();
+		clearPeerId();
 	});
 
-	it("register stores topicId and returns monitorCommand", async () => {
+	it("register stores peerId and returns monitorCommand", async () => {
 		const { client, calls } = makeMockClient();
 		const res = (await dispatch(client, noopSpawn, "register", {
-			topicId: "alice",
-		})) as { topicId: string; monitorCommand: string };
+			peerId: "alice",
+		})) as { peerId: string; monitorCommand: string };
 		assert.equal(calls.register.length, 1);
-		assert.equal(calls.register[0].topicId, "alice");
-		assert.equal(res.topicId, "alice");
+		assert.equal(calls.register[0].peerId, "alice");
+		assert.equal(res.peerId, "alice");
 		assert.equal(res.monitorCommand, "cc-messagebus tail alice");
-		assert.equal(peekTopicId(), "alice");
+		assert.equal(peekPeerId(), "alice");
 	});
 
-	it("send before register throws TOPIC_NOT_REGISTERED", async () => {
+	it("send before register throws PEER_NOT_REGISTERED", async () => {
 		const { client } = makeMockClient();
 		await assert.rejects(
 			() =>
@@ -180,15 +180,15 @@ describe("mcp/server.dispatch", () => {
 					body: "hello",
 				}),
 			(e: unknown) =>
-				e instanceof McpClientError && e.code === "TOPIC_NOT_REGISTERED",
+				e instanceof McpClientError && e.code === "PEER_NOT_REGISTERED",
 		);
 	});
 
 	it("unregister clears state so subsequent send rejects", async () => {
 		const { client } = makeMockClient();
-		await dispatch(client, noopSpawn, "register", { topicId: "alice" });
+		await dispatch(client, noopSpawn, "register", { peerId: "alice" });
 		await dispatch(client, noopSpawn, "unregister", {});
-		assert.equal(peekTopicId(), null);
+		assert.equal(peekPeerId(), null);
 		await assert.rejects(
 			() =>
 				dispatch(client, noopSpawn, "send", {
@@ -197,7 +197,7 @@ describe("mcp/server.dispatch", () => {
 					body: "hello",
 				}),
 			(e: unknown) =>
-				e instanceof McpClientError && e.code === "TOPIC_NOT_REGISTERED",
+				e instanceof McpClientError && e.code === "PEER_NOT_REGISTERED",
 		);
 	});
 
@@ -205,22 +205,22 @@ describe("mcp/server.dispatch", () => {
 		const { client } = makeMockClient({
 			register: async () => {
 				throw new McpClientError(
-					"TOPIC_ALREADY_REGISTERED",
+					"PEER_ALREADY_REGISTERED",
 					"topic 'alice' is already connected",
 				);
 			},
 		});
 		await assert.rejects(
-			() => dispatch(client, noopSpawn, "register", { topicId: "alice" }),
+			() => dispatch(client, noopSpawn, "register", { peerId: "alice" }),
 			(e: unknown) =>
-				e instanceof McpClientError && e.code === "TOPIC_ALREADY_REGISTERED",
+				e instanceof McpClientError && e.code === "PEER_ALREADY_REGISTERED",
 		);
-		assert.equal(peekTopicId(), null);
+		assert.equal(peekPeerId(), null);
 	});
 
 	it("send forwards args and injects from", async () => {
 		const { client, calls } = makeMockClient();
-		await dispatch(client, noopSpawn, "register", { topicId: "alice" });
+		await dispatch(client, noopSpawn, "register", { peerId: "alice" });
 		await dispatch(client, noopSpawn, "send", {
 			to: "bob",
 			subject: "hi",
@@ -246,117 +246,116 @@ describe("mcp/server.dispatch", () => {
 		assert.deepEqual(res.peers, []);
 	});
 
-	it("list_channels does not require register", async () => {
+	it("list_topics does not require register", async () => {
 		const { client, calls } = makeMockClient();
-		const res = (await dispatch(client, noopSpawn, "list_channels", {})) as {
-			channels: unknown[];
+		const res = (await dispatch(client, noopSpawn, "list_topics", {})) as {
+			topics: unknown[];
 		};
-		assert.equal(calls.listChannels, 1);
-		assert.deepEqual(res.channels, []);
+		assert.equal(calls.listTopics, 1);
+		assert.deepEqual(res.topics, []);
 	});
 
-	it("channel_create injects createdBy from session", async () => {
+	it("topic_create injects createdBy from session", async () => {
 		const { client, calls } = makeMockClient();
-		await dispatch(client, noopSpawn, "register", { topicId: "alice" });
-		const res = (await dispatch(client, noopSpawn, "channel_create", {
-			channelId: "general",
-		})) as { channel: { channelId: string; createdBy: string } };
-		assert.equal(calls.channelCreate.length, 1);
-		assert.deepEqual(calls.channelCreate[0], {
-			channelId: "general",
+		await dispatch(client, noopSpawn, "register", { peerId: "alice" });
+		const res = (await dispatch(client, noopSpawn, "topic_create", {
+			topicId: "general",
+		})) as { topic: { topicId: string; createdBy: string } };
+		assert.equal(calls.topicCreate.length, 1);
+		assert.deepEqual(calls.topicCreate[0], {
+			topicId: "general",
 			createdBy: "alice",
 		});
-		assert.equal(res.channel.createdBy, "alice");
+		assert.equal(res.topic.createdBy, "alice");
 	});
 
-	it("channel_create before register throws TOPIC_NOT_REGISTERED", async () => {
+	it("topic_create before register throws PEER_NOT_REGISTERED", async () => {
 		const { client } = makeMockClient();
 		await assert.rejects(
-			() =>
-				dispatch(client, noopSpawn, "channel_create", { channelId: "general" }),
+			() => dispatch(client, noopSpawn, "topic_create", { topicId: "general" }),
 			(e: unknown) =>
-				e instanceof McpClientError && e.code === "TOPIC_NOT_REGISTERED",
+				e instanceof McpClientError && e.code === "PEER_NOT_REGISTERED",
 		);
 	});
 
-	it("channel_subscribe injects topicId from session", async () => {
+	it("topic_subscribe injects peerId from session", async () => {
 		const { client, calls } = makeMockClient();
-		await dispatch(client, noopSpawn, "register", { topicId: "bob" });
-		await dispatch(client, noopSpawn, "channel_subscribe", {
-			channelId: "general",
+		await dispatch(client, noopSpawn, "register", { peerId: "bob" });
+		await dispatch(client, noopSpawn, "topic_subscribe", {
+			topicId: "general",
 		});
-		assert.equal(calls.channelSubscribe.length, 1);
-		assert.deepEqual(calls.channelSubscribe[0], {
-			channelId: "general",
-			topicId: "bob",
+		assert.equal(calls.topicSubscribe.length, 1);
+		assert.deepEqual(calls.topicSubscribe[0], {
+			topicId: "general",
+			peerId: "bob",
 		});
 	});
 
-	it("channel_send injects from from session", async () => {
+	it("topic_send injects from from session", async () => {
 		const { client, calls } = makeMockClient();
-		await dispatch(client, noopSpawn, "register", { topicId: "alice" });
-		await dispatch(client, noopSpawn, "channel_send", {
-			channelId: "general",
+		await dispatch(client, noopSpawn, "register", { peerId: "alice" });
+		await dispatch(client, noopSpawn, "topic_send", {
+			topicId: "general",
 			subject: "hi",
 			body: "hello",
 		});
-		assert.equal(calls.channelSend.length, 1);
-		assert.deepEqual(calls.channelSend[0], {
-			channelId: "general",
+		assert.equal(calls.topicSend.length, 1);
+		assert.deepEqual(calls.topicSend[0], {
+			topicId: "general",
 			from: "alice",
 			subject: "hi",
 			body: "hello",
 		});
 	});
 
-	it("channel_unsubscribe injects topicId from session", async () => {
+	it("topic_unsubscribe injects peerId from session", async () => {
 		const { client, calls } = makeMockClient();
-		await dispatch(client, noopSpawn, "register", { topicId: "bob" });
-		await dispatch(client, noopSpawn, "channel_unsubscribe", {
-			channelId: "general",
+		await dispatch(client, noopSpawn, "register", { peerId: "bob" });
+		await dispatch(client, noopSpawn, "topic_unsubscribe", {
+			topicId: "general",
 		});
-		assert.equal(calls.channelUnsubscribe.length, 1);
-		assert.deepEqual(calls.channelUnsubscribe[0], {
-			channelId: "general",
-			topicId: "bob",
+		assert.equal(calls.topicUnsubscribe.length, 1);
+		assert.deepEqual(calls.topicUnsubscribe[0], {
+			topicId: "general",
+			peerId: "bob",
 		});
 	});
 
-	it("channel_unsubscribe before register throws TOPIC_NOT_REGISTERED", async () => {
+	it("topic_unsubscribe before register throws PEER_NOT_REGISTERED", async () => {
 		const { client } = makeMockClient();
 		await assert.rejects(
 			() =>
-				dispatch(client, noopSpawn, "channel_unsubscribe", {
-					channelId: "general",
+				dispatch(client, noopSpawn, "topic_unsubscribe", {
+					topicId: "general",
 				}),
 			(e: unknown) =>
-				e instanceof McpClientError && e.code === "TOPIC_NOT_REGISTERED",
+				e instanceof McpClientError && e.code === "PEER_NOT_REGISTERED",
 		);
 	});
 
-	it("channel_history does not require register and forwards args", async () => {
+	it("topic_history does not require register and forwards args", async () => {
 		const { client, calls } = makeMockClient();
-		await dispatch(client, noopSpawn, "channel_history", {
-			channelId: "general",
+		await dispatch(client, noopSpawn, "topic_history", {
+			topicId: "general",
 			limit: 10,
 			beforeSentAt: "2026-06-19T00:00:00.000Z",
 		});
-		assert.equal(calls.channelHistory.length, 1);
-		assert.deepEqual(calls.channelHistory[0], {
-			channelId: "general",
+		assert.equal(calls.topicHistory.length, 1);
+		assert.deepEqual(calls.topicHistory[0], {
+			topicId: "general",
 			limit: 10,
 			beforeSentAt: "2026-06-19T00:00:00.000Z",
 		});
 	});
 
-	it("channel_detail does not require register and forwards channelId", async () => {
+	it("topic_detail does not require register and forwards topicId", async () => {
 		const { client, calls } = makeMockClient();
-		const res = (await dispatch(client, noopSpawn, "channel_detail", {
-			channelId: "general",
-		})) as { channel: { channelId: string; subscribers: unknown[] } };
-		assert.equal(calls.channelDetail.length, 1);
-		assert.deepEqual(calls.channelDetail[0], { channelId: "general" });
-		assert.equal(res.channel.channelId, "general");
+		const res = (await dispatch(client, noopSpawn, "topic_detail", {
+			topicId: "general",
+		})) as { topic: { topicId: string; subscribers: unknown[] } };
+		assert.equal(calls.topicDetail.length, 1);
+		assert.deepEqual(calls.topicDetail[0], { topicId: "general" });
+		assert.equal(res.topic.topicId, "general");
 	});
 
 	it("unknown tool throws UNKNOWN_TOOL", async () => {

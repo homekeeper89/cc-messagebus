@@ -1,28 +1,24 @@
 import type {
-	ChannelDto,
-	ChannelId,
-	ChannelMessageId,
 	IsoTimestamp,
 	MessageDto,
 	MessageId,
 	PeerDto,
+	PeerId,
+	TopicDto,
 	TopicId,
+	TopicMessageId,
+	TopicSummaryDto,
 } from "./http.js";
 
 export const TAIL_EVENT_TYPES = {
 	messageDelivered: "message_delivered",
-	heartbeat: "heartbeat",
 } as const;
 
 export interface MessageDeliveredEvent {
 	type: "message_delivered";
 	message: MessageDto;
 }
-export interface TailHeartbeatEvent {
-	type: "heartbeat";
-	at: IsoTimestamp;
-}
-export type TailEvent = MessageDeliveredEvent | TailHeartbeatEvent;
+export type TailEvent = MessageDeliveredEvent;
 
 export const DASHBOARD_EVENT_TYPES = {
 	sessionSnapshot: "session_snapshot",
@@ -33,16 +29,16 @@ export const DASHBOARD_EVENT_TYPES = {
 	messageAcked: "message_acked",
 	messageRedelivered: "message_redelivered",
 	messageExpired: "message_expired",
-	heartbeat: "heartbeat",
-	channelCreated: "channel_created",
-	channelSubscribed: "channel_subscribed",
-	channelUnsubscribed: "channel_unsubscribed",
-	channelMessagePublished: "channel_message_published",
+	topicCreated: "topic_created",
+	topicSubscribed: "topic_subscribed",
+	topicUnsubscribed: "topic_unsubscribed",
+	topicMessagePublished: "topic_message_published",
 } as const;
 
 export interface SessionSnapshotEvent {
 	type: "session_snapshot";
 	peers: PeerDto[];
+	topics: TopicSummaryDto[];
 	at: IsoTimestamp;
 }
 
@@ -52,7 +48,7 @@ export interface SessionRegisteredEvent {
 }
 export interface SessionDisconnectedEvent {
 	type: "session_disconnected";
-	topicId: TopicId;
+	peerId: PeerId;
 	at: IsoTimestamp;
 }
 export interface MessageSentEvent {
@@ -62,13 +58,13 @@ export interface MessageSentEvent {
 export interface MessageReadEvent {
 	type: "message_read";
 	messageId: MessageId;
-	topicId: TopicId;
+	peerId: PeerId;
 	at: IsoTimestamp;
 }
 export interface MessageAckedEvent {
 	type: "message_acked";
 	messageId: MessageId;
-	topicId: TopicId;
+	peerId: PeerId;
 	at: IsoTimestamp;
 }
 export interface MessageRedeliveredEvent {
@@ -81,33 +77,29 @@ export interface MessageExpiredEvent {
 	messageId: MessageId;
 	at: IsoTimestamp;
 }
-export interface DashboardHeartbeatEvent {
-	type: "heartbeat";
-	at: IsoTimestamp;
-}
 
-export interface ChannelCreatedEvent {
-	type: "channel_created";
-	channel: ChannelDto;
+export interface TopicCreatedEvent {
+	type: "topic_created";
+	topic: TopicDto;
 }
-export interface ChannelSubscribedEvent {
-	type: "channel_subscribed";
-	channelId: ChannelId;
+export interface TopicSubscribedEvent {
+	type: "topic_subscribed";
 	topicId: TopicId;
+	peerId: PeerId;
 	at: IsoTimestamp;
 }
-export interface ChannelUnsubscribedEvent {
-	type: "channel_unsubscribed";
-	channelId: ChannelId;
+export interface TopicUnsubscribedEvent {
+	type: "topic_unsubscribed";
 	topicId: TopicId;
+	peerId: PeerId;
 	at: IsoTimestamp;
 }
-export interface ChannelMessagePublishedEvent {
-	type: "channel_message_published";
-	channelId: ChannelId;
-	channelMessageId: ChannelMessageId;
-	from: TopicId;
-	deliveredTo: TopicId[];
+export interface TopicMessagePublishedEvent {
+	type: "topic_message_published";
+	topicId: TopicId;
+	topicMessageId: TopicMessageId;
+	from: PeerId;
+	deliveredTo: PeerId[];
 	sentAt: IsoTimestamp;
 }
 
@@ -120,13 +112,10 @@ export type DashboardEvent =
 	| MessageAckedEvent
 	| MessageRedeliveredEvent
 	| MessageExpiredEvent
-	| DashboardHeartbeatEvent
-	| ChannelCreatedEvent
-	| ChannelSubscribedEvent
-	| ChannelUnsubscribedEvent
-	| ChannelMessagePublishedEvent;
-
-export const SSE_HEARTBEAT_INTERVAL_SEC = 15;
+	| TopicCreatedEvent
+	| TopicSubscribedEvent
+	| TopicUnsubscribedEvent
+	| TopicMessagePublishedEvent;
 
 export function serializeSseEvent<T extends { type: string }>(
 	event: T,

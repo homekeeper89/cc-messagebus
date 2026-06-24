@@ -1,32 +1,32 @@
-import type { TopicId } from "../protocol/http.js";
+import type { PeerId } from "../protocol/http.js";
 import { McpClientError } from "./broker-client.js";
 
-let currentTopicId: TopicId | null = null;
+let currentPeerId: PeerId | null = null;
 
-export function setTopicId(id: TopicId): void {
-	if (currentTopicId !== null) {
+export function setPeerId(id: PeerId): void {
+	if (currentPeerId !== null) {
 		throw new McpClientError(
-			"TOPIC_ALREADY_REGISTERED",
-			`adapter already registered as '${currentTopicId}'`,
+			"PEER_ALREADY_REGISTERED",
+			`adapter already registered as '${currentPeerId}'`,
 		);
 	}
-	currentTopicId = id;
+	currentPeerId = id;
 }
 
-export function clearTopicId(): void {
-	currentTopicId = null;
+export function clearPeerId(): void {
+	currentPeerId = null;
 }
 
-export function requireTopicId(): TopicId {
-	if (currentTopicId === null) {
+export function requirePeerId(): PeerId {
+	if (currentPeerId === null) {
 		throw new McpClientError(
-			"TOPIC_NOT_REGISTERED",
+			"PEER_NOT_REGISTERED",
 			"this session has not called register yet",
 		);
 	}
-	return currentTopicId;
+	return currentPeerId;
 }
 
-export function peekTopicId(): TopicId | null {
-	return currentTopicId;
+export function peekPeerId(): PeerId | null {
+	return currentPeerId;
 }

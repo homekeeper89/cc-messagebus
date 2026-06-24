@@ -42,24 +42,24 @@ describe("broker", () => {
 		broker.events.on("session_registered", (e) => {
 			receivedEvent = e;
 		});
-		const result = broker.register({ topicId: "alice" });
-		assert.equal(result.topicId, "alice");
+		const result = broker.register({ peerId: "alice" });
+		assert.equal(result.peerId, "alice");
 		assert.equal(result.monitorCommand, "cc-messagebus tail alice");
 		assert.equal(result.dashboardUrl, "http://localhost:5959");
 		assert.ok(receivedEvent);
 	});
 
 	test("register throws BrokerError on connected duplicate", () => {
-		broker.register({ topicId: "alice" });
+		broker.register({ peerId: "alice" });
 		assert.throws(
-			() => broker.register({ topicId: "alice" }),
+			() => broker.register({ peerId: "alice" }),
 			(err: unknown) =>
-				err instanceof BrokerError && err.code === "TOPIC_ALREADY_REGISTERED",
+				err instanceof BrokerError && err.code === "PEER_ALREADY_REGISTERED",
 		);
 	});
 
 	test("send: target not registered throws PEER_NOT_FOUND", () => {
-		broker.register({ topicId: "alice" });
+		broker.register({ peerId: "alice" });
 		assert.throws(
 			() =>
 				broker.send({
@@ -74,8 +74,8 @@ describe("broker", () => {
 	});
 
 	test("send to disconnected target still queues", () => {
-		broker.register({ topicId: "alice" });
-		broker.register({ topicId: "bob" });
+		broker.register({ peerId: "alice" });
+		broker.register({ peerId: "bob" });
 		broker.disconnect("bob");
 		const result = broker.send({
 			from: "alice",
@@ -85,55 +85,55 @@ describe("broker", () => {
 		});
 		assert.ok(result.messageId);
 		const peers = broker.listPeers().peers;
-		const bob = peers.find((p) => p.topicId === "bob");
+		const bob = peers.find((p) => p.peerId === "bob");
 		assert.equal(bob?.queueLength, 1);
 		assert.equal(bob?.status, "disconnected");
 	});
 
 	test("end-to-end: register/send/read/ack flow", () => {
-		broker.register({ topicId: "alice" });
-		broker.register({ topicId: "bob" });
+		broker.register({ peerId: "alice" });
+		broker.register({ peerId: "bob" });
 		const sent = broker.send({
 			from: "alice",
 			to: "bob",
 			subject: "ping",
 			body: "hello",
 		});
-		const read = broker.read({ topicId: "bob" });
+		const read = broker.read({ peerId: "bob" });
 		assert.equal(read.messages.length, 1);
 		assert.equal(read.messages[0]?.id, sent.messageId);
 		assert.equal(read.messages[0]?.subject, "ping");
 		assert.ok(read.messages[0]?.inFlightUntil);
 
-		const acked = broker.ack({ topicId: "bob", messageId: sent.messageId });
+		const acked = broker.ack({ peerId: "bob", messageId: sent.messageId });
 		assert.ok(acked.ackedAt);
 
-		const reread = broker.read({ topicId: "bob" });
+		const reread = broker.read({ peerId: "bob" });
 		assert.equal(reread.messages.length, 0);
 	});
 
 	test("ack: already-acked message throws MESSAGE_NOT_IN_FLIGHT", () => {
-		broker.register({ topicId: "alice" });
-		broker.register({ topicId: "bob" });
+		broker.register({ peerId: "alice" });
+		broker.register({ peerId: "bob" });
 		const sent = broker.send({
 			from: "alice",
 			to: "bob",
 			subject: "s",
 			body: "b",
 		});
-		broker.read({ topicId: "bob" });
-		broker.ack({ topicId: "bob", messageId: sent.messageId });
+		broker.read({ peerId: "bob" });
+		broker.ack({ peerId: "bob", messageId: sent.messageId });
 		assert.throws(
-			() => broker.ack({ topicId: "bob", messageId: sent.messageId }),
+			() => broker.ack({ peerId: "bob", messageId: sent.messageId }),
 			(err: unknown) =>
 				err instanceof BrokerError && err.code === "MESSAGE_NOT_IN_FLIGHT",
 		);
 	});
 
 	test("ack: unknown messageId throws MESSAGE_NOT_FOUND", () => {
-		broker.register({ topicId: "bob" });
+		broker.register({ peerId: "bob" });
 		assert.throws(
-			() => broker.ack({ topicId: "bob", messageId: "nope" }),
+			() => broker.ack({ peerId: "bob", messageId: "nope" }),
 			(err: unknown) =>
 				err instanceof BrokerError && err.code === "MESSAGE_NOT_FOUND",
 		);
@@ -145,12 +145,12 @@ describe("broker", () => {
 			ttlDays: 30,
 			dashboardUrl: "http://localhost:5959",
 		});
-		shortBroker.register({ topicId: "alice" });
-		shortBroker.register({ topicId: "bob" });
+		shortBroker.register({ peerId: "alice" });
+		shortBroker.register({ peerId: "bob" });
 		shortBroker.send({ from: "alice", to: "bob", subject: "s", body: "b" });
-		const first = shortBroker.read({ topicId: "bob" });
+		const first = shortBroker.read({ peerId: "bob" });
 		assert.equal(first.messages.length, 1);
-		const second = shortBroker.read({ topicId: "bob" });
+		const second = shortBroker.read({ peerId: "bob" });
 		assert.equal(
 			second.messages.length,
 			1,
@@ -158,51 +158,51 @@ describe("broker", () => {
 		);
 	});
 
-	test("unregister: throws TOPIC_NOT_FOUND for unknown topic", () => {
+	test("unregister: throws PEER_NOT_FOUND for unknown topic", () => {
 		assert.throws(
-			() => broker.unregister("ghost", { topicId: "ghost" }),
+			() => broker.unregister("ghost", { peerId: "ghost" }),
 			(err: unknown) =>
-				err instanceof BrokerError && err.code === "TOPIC_NOT_FOUND",
+				err instanceof BrokerError && err.code === "PEER_NOT_FOUND",
 		);
 	});
 
 	test("unregister: purgeQueue=false preserves messages", () => {
-		broker.register({ topicId: "alice" });
-		broker.register({ topicId: "bob" });
+		broker.register({ peerId: "alice" });
+		broker.register({ peerId: "bob" });
 		broker.send({ from: "alice", to: "bob", subject: "s", body: "b" });
 		const result = broker.unregister("bob", {
-			topicId: "bob",
+			peerId: "bob",
 			purgeQueue: false,
 		});
 		assert.equal(result.purged, false);
-		broker.register({ topicId: "bob" });
+		broker.register({ peerId: "bob" });
 		const peers = broker.listPeers().peers;
-		const bob = peers.find((p) => p.topicId === "bob");
+		const bob = peers.find((p) => p.peerId === "bob");
 		assert.equal(bob?.queueLength, 1, "queued message survives unregister");
 	});
 
 	test("unregister: purgeQueue=true drops queued messages", () => {
-		broker.register({ topicId: "alice" });
-		broker.register({ topicId: "bob" });
+		broker.register({ peerId: "alice" });
+		broker.register({ peerId: "bob" });
 		broker.send({ from: "alice", to: "bob", subject: "s", body: "b" });
 		const result = broker.unregister("bob", {
-			topicId: "bob",
+			peerId: "bob",
 			purgeQueue: true,
 		});
 		assert.equal(result.purged, true);
-		broker.register({ topicId: "bob" });
+		broker.register({ peerId: "bob" });
 		const peers = broker.listPeers().peers;
-		const bob = peers.find((p) => p.topicId === "bob");
+		const bob = peers.find((p) => p.peerId === "bob");
 		assert.equal(bob?.queueLength, 0, "queue purged");
 	});
 
 	test("unregister: emits session_disconnected", () => {
-		broker.register({ topicId: "alice" });
+		broker.register({ peerId: "alice" });
 		let received: unknown = null;
 		broker.events.on("session_disconnected", (e) => {
 			received = e;
 		});
-		broker.unregister("alice", { topicId: "alice" });
+		broker.unregister("alice", { peerId: "alice" });
 		assert.ok(received);
 	});
 
@@ -210,7 +210,7 @@ describe("broker", () => {
 		broker.events.on("session_registered", () => {
 			throw new Error("listener fail");
 		});
-		assert.doesNotThrow(() => broker.register({ topicId: "alice" }));
+		assert.doesNotThrow(() => broker.register({ peerId: "alice" }));
 	});
 
 	describe("last_activity_at tracking", () => {
@@ -227,8 +227,8 @@ describe("broker", () => {
 		});
 
 		test("send_should_update_last_activity_at_for_sender", () => {
-			activityBroker.register({ topicId: "alice" });
-			activityBroker.register({ topicId: "bob" });
+			activityBroker.register({ peerId: "alice" });
+			activityBroker.register({ peerId: "bob" });
 			activityBroker.send({
 				from: "alice",
 				to: "bob",
@@ -239,8 +239,8 @@ describe("broker", () => {
 		});
 
 		test("read_should_update_last_activity_at_for_reader_even_when_empty", () => {
-			activityBroker.register({ topicId: "bob" });
-			const result = activityBroker.read({ topicId: "bob" });
+			activityBroker.register({ peerId: "bob" });
+			const result = activityBroker.read({ peerId: "bob" });
 			assert.equal(result.messages.length, 0);
 			assert.equal(
 				db.inspectLastActivityAt("bob"),
@@ -250,48 +250,48 @@ describe("broker", () => {
 		});
 
 		test("ack_should_update_last_activity_at_for_acker", () => {
-			activityBroker.register({ topicId: "alice" });
-			activityBroker.register({ topicId: "bob" });
+			activityBroker.register({ peerId: "alice" });
+			activityBroker.register({ peerId: "bob" });
 			const sent = activityBroker.send({
 				from: "alice",
 				to: "bob",
 				subject: "s",
 				body: "b",
 			});
-			activityBroker.read({ topicId: "bob" });
-			activityBroker.ack({ topicId: "bob", messageId: sent.messageId });
+			activityBroker.read({ peerId: "bob" });
+			activityBroker.ack({ peerId: "bob", messageId: sent.messageId });
 			assert.equal(db.inspectLastActivityAt("bob"), FIXED_NOW);
 		});
 
-		test("channelSubscribe_should_update_last_activity_at_for_subscriber", () => {
-			activityBroker.register({ topicId: "alice" });
-			activityBroker.channelCreate({
-				channelId: "epic-1",
+		test("topicSubscribe_should_update_last_activity_at_for_subscriber", () => {
+			activityBroker.register({ peerId: "alice" });
+			activityBroker.topicCreate({
+				topicId: "epic-1",
 				createdBy: "alice",
 			});
-			activityBroker.register({ topicId: "bob" });
-			activityBroker.channelSubscribe({
-				channelId: "epic-1",
-				topicId: "bob",
+			activityBroker.register({ peerId: "bob" });
+			activityBroker.topicSubscribe({
+				topicId: "epic-1",
+				peerId: "bob",
 			});
 			assert.equal(db.inspectLastActivityAt("bob"), FIXED_NOW);
 		});
 
-		test("channelSend_should_update_last_activity_at_for_sender_only", () => {
-			activityBroker.register({ topicId: "alice" });
-			activityBroker.channelCreate({
-				channelId: "epic-1",
+		test("topicSend_should_update_last_activity_at_for_sender_only", () => {
+			activityBroker.register({ peerId: "alice" });
+			activityBroker.topicCreate({
+				topicId: "epic-1",
 				createdBy: "alice",
 			});
-			activityBroker.register({ topicId: "bob" });
-			activityBroker.channelSubscribe({
-				channelId: "epic-1",
-				topicId: "bob",
+			activityBroker.register({ peerId: "bob" });
+			activityBroker.topicSubscribe({
+				topicId: "epic-1",
+				peerId: "bob",
 			});
 
 			const bobBefore = db.inspectLastActivityAt("bob");
-			activityBroker.channelSend({
-				channelId: "epic-1",
+			activityBroker.topicSend({
+				topicId: "epic-1",
 				from: "alice",
 				subject: "s",
 				body: "b",
@@ -305,7 +305,7 @@ describe("broker", () => {
 		});
 
 		test("register_should_not_update_last_activity_at", () => {
-			activityBroker.register({ topicId: "alice" });
+			activityBroker.register({ peerId: "alice" });
 			assert.equal(
 				db.inspectLastActivityAt("alice"),
 				null,
@@ -313,30 +313,30 @@ describe("broker", () => {
 			);
 		});
 
-		test("channelCreate_should_not_update_last_activity_at", () => {
-			activityBroker.register({ topicId: "alice" });
-			activityBroker.channelCreate({
-				channelId: "epic-1",
+		test("topicCreate_should_not_update_last_activity_at", () => {
+			activityBroker.register({ peerId: "alice" });
+			activityBroker.topicCreate({
+				topicId: "epic-1",
 				createdBy: "alice",
 			});
 			assert.equal(db.inspectLastActivityAt("alice"), null);
 		});
 
-		test("channelUnsubscribe_should_not_update_last_activity_at", () => {
-			activityBroker.register({ topicId: "alice" });
-			activityBroker.channelCreate({
-				channelId: "epic-1",
+		test("topicUnsubscribe_should_not_update_last_activity_at", () => {
+			activityBroker.register({ peerId: "alice" });
+			activityBroker.topicCreate({
+				topicId: "epic-1",
 				createdBy: "alice",
 			});
-			activityBroker.register({ topicId: "bob" });
-			activityBroker.channelSubscribe({
-				channelId: "epic-1",
-				topicId: "bob",
+			activityBroker.register({ peerId: "bob" });
+			activityBroker.topicSubscribe({
+				topicId: "epic-1",
+				peerId: "bob",
 			});
 			const bobAfterSubscribe = db.inspectLastActivityAt("bob");
-			activityBroker.channelUnsubscribe({
-				channelId: "epic-1",
-				topicId: "bob",
+			activityBroker.topicUnsubscribe({
+				topicId: "epic-1",
+				peerId: "bob",
 			});
 			assert.equal(
 				db.inspectLastActivityAt("bob"),
@@ -356,9 +356,9 @@ describe("broker", () => {
 				dashboardUrl: "http://localhost:5959",
 				clock: () => FIXED_NOW,
 			});
-			fixedBroker.register({ topicId: "alice" });
+			fixedBroker.register({ peerId: "alice" });
 			const peers = fixedBroker.listPeers().peers;
-			const alice = peers.find((p) => p.topicId === "alice");
+			const alice = peers.find((p) => p.peerId === "alice");
 			assert.equal(alice?.lastActivityAt, null);
 		});
 
@@ -369,8 +369,8 @@ describe("broker", () => {
 				dashboardUrl: "http://localhost:5959",
 				clock: () => FIXED_NOW,
 			});
-			fixedBroker.register({ topicId: "alice" });
-			fixedBroker.register({ topicId: "bob" });
+			fixedBroker.register({ peerId: "alice" });
+			fixedBroker.register({ peerId: "bob" });
 			fixedBroker.send({
 				from: "alice",
 				to: "bob",
@@ -378,7 +378,7 @@ describe("broker", () => {
 				body: "b",
 			});
 			const peers = fixedBroker.listPeers().peers;
-			const alice = peers.find((p) => p.topicId === "alice");
+			const alice = peers.find((p) => p.peerId === "alice");
 			assert.equal(alice?.lastActivityAt, FIXED_NOW);
 		});
 
@@ -390,9 +390,9 @@ describe("broker", () => {
 				dashboardUrl: "http://localhost:5959",
 				clock: () => now,
 			});
-			mutableBroker.register({ topicId: "charlie" });
-			mutableBroker.register({ topicId: "alice" });
-			mutableBroker.register({ topicId: "bob" });
+			mutableBroker.register({ peerId: "charlie" });
+			mutableBroker.register({ peerId: "alice" });
+			mutableBroker.register({ peerId: "bob" });
 			now = "2026-06-20T00:00:01.000Z";
 			mutableBroker.send({
 				from: "alice",
@@ -407,8 +407,8 @@ describe("broker", () => {
 				subject: "s",
 				body: "b",
 			});
-			const topicIds = mutableBroker.listPeers().peers.map((p) => p.topicId);
-			assert.deepEqual(topicIds, ["bob", "alice", "charlie"]);
+			const peerIds = mutableBroker.listPeers().peers.map((p) => p.peerId);
+			assert.deepEqual(peerIds, ["bob", "alice", "charlie"]);
 		});
 
 		test("listPeers tie-breaks by connected_at ASC when both last_activity_at are NULL", () => {
@@ -419,21 +419,21 @@ describe("broker", () => {
 				dashboardUrl: "http://localhost:5959",
 				clock: () => now,
 			});
-			mutableBroker.register({ topicId: "zulu" });
+			mutableBroker.register({ peerId: "zulu" });
 			now = "2026-06-20T00:00:01.000Z";
-			mutableBroker.register({ topicId: "alpha" });
-			const topicIds = mutableBroker.listPeers().peers.map((p) => p.topicId);
-			assert.deepEqual(topicIds, ["zulu", "alpha"]);
+			mutableBroker.register({ peerId: "alpha" });
+			const peerIds = mutableBroker.listPeers().peers.map((p) => p.peerId);
+			assert.deepEqual(peerIds, ["zulu", "alpha"]);
 		});
 	});
 
-	describe("list_channels", () => {
-		test("returns empty array when no channels exist", () => {
-			const res = broker.listChannels();
-			assert.deepEqual(res.channels, []);
+	describe("list_topics", () => {
+		test("returns empty array when no topics exist", () => {
+			const res = broker.listTopics();
+			assert.deepEqual(res.topics, []);
 		});
 
-		test("returns channel with subscriberCount=0 and lastPublishedAt=null when no subscribers and no messages", () => {
+		test("returns topic with subscriberCount=0 and lastPublishedAt=null when no subscribers and no messages", () => {
 			let now = "2026-06-20T00:00:00.000Z";
 			const fixedBroker = createBroker(db, {
 				visibilityTimeoutSec: 30,
@@ -441,32 +441,32 @@ describe("broker", () => {
 				dashboardUrl: "http://localhost:5959",
 				clock: () => now,
 			});
-			fixedBroker.register({ topicId: "alice" });
+			fixedBroker.register({ peerId: "alice" });
 			now = "2026-06-20T00:00:01.000Z";
-			fixedBroker.channelCreate({ channelId: "general", createdBy: "alice" });
-			const res = fixedBroker.listChannels();
-			assert.equal(res.channels.length, 1);
-			assert.equal(res.channels[0].channelId, "general");
-			assert.equal(res.channels[0].createdBy, "alice");
-			assert.equal(res.channels[0].createdAt, "2026-06-20T00:00:01.000Z");
-			assert.equal(res.channels[0].subscriberCount, 0);
-			assert.equal(res.channels[0].lastPublishedAt, null);
+			fixedBroker.topicCreate({ topicId: "general", createdBy: "alice" });
+			const res = fixedBroker.listTopics();
+			assert.equal(res.topics.length, 1);
+			assert.equal(res.topics[0].topicId, "general");
+			assert.equal(res.topics[0].createdBy, "alice");
+			assert.equal(res.topics[0].createdAt, "2026-06-20T00:00:01.000Z");
+			assert.equal(res.topics[0].subscriberCount, 0);
+			assert.equal(res.topics[0].lastPublishedAt, null);
 		});
 
 		test("counts distinct subscribers across multiple subscriptions", () => {
-			broker.register({ topicId: "alice" });
-			broker.register({ topicId: "bob" });
-			broker.register({ topicId: "carol" });
-			broker.channelCreate({ channelId: "ch1", createdBy: "alice" });
-			broker.channelSubscribe({ channelId: "ch1", topicId: "alice" });
-			broker.channelSubscribe({ channelId: "ch1", topicId: "bob" });
-			broker.channelSubscribe({ channelId: "ch1", topicId: "carol" });
-			const res = broker.listChannels();
-			assert.equal(res.channels.length, 1);
-			assert.equal(res.channels[0].subscriberCount, 3);
+			broker.register({ peerId: "alice" });
+			broker.register({ peerId: "bob" });
+			broker.register({ peerId: "carol" });
+			broker.topicCreate({ topicId: "ch1", createdBy: "alice" });
+			broker.topicSubscribe({ topicId: "ch1", peerId: "alice" });
+			broker.topicSubscribe({ topicId: "ch1", peerId: "bob" });
+			broker.topicSubscribe({ topicId: "ch1", peerId: "carol" });
+			const res = broker.listTopics();
+			assert.equal(res.topics.length, 1);
+			assert.equal(res.topics[0].subscriberCount, 3);
 		});
 
-		test("orders channels by lastPublishedAt DESC with NULLS last, tie-breaks by createdAt ASC", () => {
+		test("orders topics by lastPublishedAt DESC with NULLS last, tie-breaks by createdAt ASC", () => {
 			let now = "2026-06-20T00:00:00.000Z";
 			const mutableBroker = createBroker(db, {
 				visibilityTimeoutSec: 30,
@@ -474,51 +474,51 @@ describe("broker", () => {
 				dashboardUrl: "http://localhost:5959",
 				clock: () => now,
 			});
-			mutableBroker.register({ topicId: "alice" });
-			mutableBroker.register({ topicId: "bob" });
+			mutableBroker.register({ peerId: "alice" });
+			mutableBroker.register({ peerId: "bob" });
 			now = "2026-06-20T00:00:01.000Z";
-			mutableBroker.channelCreate({
-				channelId: "older-silent",
+			mutableBroker.topicCreate({
+				topicId: "older-silent",
 				createdBy: "alice",
 			});
 			now = "2026-06-20T00:00:02.000Z";
-			mutableBroker.channelCreate({
-				channelId: "newer-silent",
+			mutableBroker.topicCreate({
+				topicId: "newer-silent",
 				createdBy: "alice",
 			});
 			now = "2026-06-20T00:00:03.000Z";
-			mutableBroker.channelCreate({
-				channelId: "old-active",
+			mutableBroker.topicCreate({
+				topicId: "old-active",
 				createdBy: "alice",
 			});
-			mutableBroker.channelSubscribe({
-				channelId: "old-active",
-				topicId: "bob",
+			mutableBroker.topicSubscribe({
+				topicId: "old-active",
+				peerId: "bob",
 			});
 			now = "2026-06-20T00:00:04.000Z";
-			mutableBroker.channelCreate({
-				channelId: "new-active",
+			mutableBroker.topicCreate({
+				topicId: "new-active",
 				createdBy: "alice",
 			});
-			mutableBroker.channelSubscribe({
-				channelId: "new-active",
-				topicId: "bob",
+			mutableBroker.topicSubscribe({
+				topicId: "new-active",
+				peerId: "bob",
 			});
 			now = "2026-06-20T00:00:05.000Z";
-			mutableBroker.channelSend({
-				channelId: "old-active",
+			mutableBroker.topicSend({
+				topicId: "old-active",
 				from: "alice",
 				subject: "s",
 				body: "b",
 			});
 			now = "2026-06-20T00:00:06.000Z";
-			mutableBroker.channelSend({
-				channelId: "new-active",
+			mutableBroker.topicSend({
+				topicId: "new-active",
 				from: "alice",
 				subject: "s",
 				body: "b",
 			});
-			const ids = mutableBroker.listChannels().channels.map((c) => c.channelId);
+			const ids = mutableBroker.listTopics().topics.map((c) => c.topicId);
 			assert.deepEqual(ids, [
 				"new-active",
 				"old-active",
@@ -528,25 +528,25 @@ describe("broker", () => {
 		});
 	});
 
-	describe("channel_detail", () => {
-		test("channelDetail_should_throw_CHANNEL_NOT_FOUND_when_channel_missing", () => {
+	describe("topic_detail", () => {
+		test("topicDetail_should_throw_TOPIC_NOT_FOUND_when_topic_missing", () => {
 			assert.throws(
-				() => broker.channelDetail({ channelId: "ghost" }),
+				() => broker.topicDetail({ topicId: "ghost" }),
 				(e: unknown) =>
-					e instanceof BrokerError && e.code === "CHANNEL_NOT_FOUND",
+					e instanceof BrokerError && e.code === "TOPIC_NOT_FOUND",
 			);
 		});
 
-		test("channelDetail_should_return_empty_subscribers_when_none_subscribed", () => {
-			broker.register({ topicId: "alice" });
-			broker.channelCreate({ channelId: "empty", createdBy: "alice" });
-			const res = broker.channelDetail({ channelId: "empty" });
-			assert.equal(res.channel.channelId, "empty");
-			assert.equal(res.channel.createdBy, "alice");
-			assert.deepEqual(res.channel.subscribers, []);
+		test("topicDetail_should_return_empty_subscribers_when_none_subscribed", () => {
+			broker.register({ peerId: "alice" });
+			broker.topicCreate({ topicId: "empty", createdBy: "alice" });
+			const res = broker.topicDetail({ topicId: "empty" });
+			assert.equal(res.topic.topicId, "empty");
+			assert.equal(res.topic.createdBy, "alice");
+			assert.deepEqual(res.topic.subscribers, []);
 		});
 
-		test("channelDetail_should_list_subscribers_ordered_by_subscribed_at_ASC", () => {
+		test("topicDetail_should_list_subscribers_ordered_by_subscribed_at_ASC", () => {
 			let now = "2026-06-20T00:00:00.000Z";
 			db.close();
 			rmSync(dbPath, { force: true });
@@ -558,22 +558,22 @@ describe("broker", () => {
 				clock: () => now,
 			});
 
-			mutableBroker.register({ topicId: "alice" });
-			mutableBroker.register({ topicId: "bob" });
-			mutableBroker.register({ topicId: "carol" });
-			mutableBroker.channelCreate({ channelId: "ch1", createdBy: "alice" });
+			mutableBroker.register({ peerId: "alice" });
+			mutableBroker.register({ peerId: "bob" });
+			mutableBroker.register({ peerId: "carol" });
+			mutableBroker.topicCreate({ topicId: "ch1", createdBy: "alice" });
 
 			now = "2026-06-20T00:00:01.000Z";
-			mutableBroker.channelSubscribe({ channelId: "ch1", topicId: "bob" });
+			mutableBroker.topicSubscribe({ topicId: "ch1", peerId: "bob" });
 			now = "2026-06-20T00:00:02.000Z";
-			mutableBroker.channelSubscribe({ channelId: "ch1", topicId: "carol" });
+			mutableBroker.topicSubscribe({ topicId: "ch1", peerId: "carol" });
 
-			const res = mutableBroker.channelDetail({ channelId: "ch1" });
-			const ids = res.channel.subscribers.map((s) => s.topicId);
+			const res = mutableBroker.topicDetail({ topicId: "ch1" });
+			const ids = res.topic.subscribers.map((s) => s.peerId);
 			assert.deepEqual(ids, ["bob", "carol"]);
 		});
 
-		test("channelDetail_should_compute_queueDepth_and_lastReadAt_per_subscriber", () => {
+		test("topicDetail_should_compute_queueDepth_and_lastReadAt_per_subscriber", () => {
 			let now = "2026-06-20T00:00:00.000Z";
 			db.close();
 			rmSync(dbPath, { force: true });
@@ -585,23 +585,23 @@ describe("broker", () => {
 				clock: () => now,
 			});
 
-			mutableBroker.register({ topicId: "alice" });
-			mutableBroker.register({ topicId: "bob" });
-			mutableBroker.register({ topicId: "carol" });
-			mutableBroker.channelCreate({ channelId: "ch1", createdBy: "alice" });
-			mutableBroker.channelSubscribe({ channelId: "ch1", topicId: "bob" });
-			mutableBroker.channelSubscribe({ channelId: "ch1", topicId: "carol" });
+			mutableBroker.register({ peerId: "alice" });
+			mutableBroker.register({ peerId: "bob" });
+			mutableBroker.register({ peerId: "carol" });
+			mutableBroker.topicCreate({ topicId: "ch1", createdBy: "alice" });
+			mutableBroker.topicSubscribe({ topicId: "ch1", peerId: "bob" });
+			mutableBroker.topicSubscribe({ topicId: "ch1", peerId: "carol" });
 
 			now = "2026-06-20T00:00:10.000Z";
-			mutableBroker.channelSend({
-				channelId: "ch1",
+			mutableBroker.topicSend({
+				topicId: "ch1",
 				from: "alice",
 				subject: "m1",
 				body: "b1",
 			});
 			now = "2026-06-20T00:00:11.000Z";
-			mutableBroker.channelSend({
-				channelId: "ch1",
+			mutableBroker.topicSend({
+				topicId: "ch1",
 				from: "alice",
 				subject: "m2",
 				body: "b2",
@@ -609,16 +609,16 @@ describe("broker", () => {
 
 			// bob: reads and acks m1 only — queueDepth=1, lastReadAt = ack time of m1
 			now = "2026-06-20T00:00:20.000Z";
-			const bobMsgs = mutableBroker.read({ topicId: "bob" }).messages;
+			const bobMsgs = mutableBroker.read({ peerId: "bob" }).messages;
 			const bobM1 = bobMsgs.find((m) => m.subject === "m1");
 			assert.ok(bobM1);
 			now = "2026-06-20T00:00:21.000Z";
-			mutableBroker.ack({ topicId: "bob", messageId: bobM1.id });
+			mutableBroker.ack({ peerId: "bob", messageId: bobM1.id });
 
 			// carol: no acks — queueDepth=2, lastReadAt=null
-			const res = mutableBroker.channelDetail({ channelId: "ch1" });
-			const bob = res.channel.subscribers.find((s) => s.topicId === "bob");
-			const carol = res.channel.subscribers.find((s) => s.topicId === "carol");
+			const res = mutableBroker.topicDetail({ topicId: "ch1" });
+			const bob = res.topic.subscribers.find((s) => s.peerId === "bob");
+			const carol = res.topic.subscribers.find((s) => s.peerId === "carol");
 			assert.ok(bob);
 			assert.ok(carol);
 			assert.equal(bob.queueDepth, 1);
@@ -627,32 +627,32 @@ describe("broker", () => {
 			assert.equal(carol.lastReadAt, null);
 		});
 
-		test("channelDetail_should_handle_many_subscribers_in_single_query", () => {
-			broker.register({ topicId: "alice" });
-			broker.channelCreate({ channelId: "wide", createdBy: "alice" });
+		test("topicDetail_should_handle_many_subscribers_in_single_query", () => {
+			broker.register({ peerId: "alice" });
+			broker.topicCreate({ topicId: "wide", createdBy: "alice" });
 			const subscribers = Array.from({ length: 50 }, (_, i) => `peer-${i}`);
 			for (const t of subscribers) {
-				broker.register({ topicId: t });
-				broker.channelSubscribe({ channelId: "wide", topicId: t });
+				broker.register({ peerId: t });
+				broker.topicSubscribe({ topicId: "wide", peerId: t });
 			}
-			const res = broker.channelDetail({ channelId: "wide" });
-			assert.equal(res.channel.subscribers.length, 50);
-			for (const s of res.channel.subscribers) {
+			const res = broker.topicDetail({ topicId: "wide" });
+			assert.equal(res.topic.subscribers.length, 50);
+			for (const s of res.topic.subscribers) {
 				assert.equal(s.queueDepth, 0);
 				assert.equal(s.lastReadAt, null);
 			}
 		});
 
-		test("channelDetail_should_only_count_channel_origin_messages_not_direct_sends", () => {
-			broker.register({ topicId: "alice" });
-			broker.register({ topicId: "bob" });
-			broker.channelCreate({ channelId: "ch1", createdBy: "alice" });
-			broker.channelSubscribe({ channelId: "ch1", topicId: "bob" });
-			// direct send (not channel) — must NOT count toward queueDepth
+		test("topicDetail_should_only_count_topic_origin_messages_not_direct_sends", () => {
+			broker.register({ peerId: "alice" });
+			broker.register({ peerId: "bob" });
+			broker.topicCreate({ topicId: "ch1", createdBy: "alice" });
+			broker.topicSubscribe({ topicId: "ch1", peerId: "bob" });
+			// direct send (not topic) — must NOT count toward queueDepth
 			broker.send({ from: "alice", to: "bob", subject: "direct", body: "d" });
 
-			const res = broker.channelDetail({ channelId: "ch1" });
-			const bob = res.channel.subscribers.find((s) => s.topicId === "bob");
+			const res = broker.topicDetail({ topicId: "ch1" });
+			const bob = res.topic.subscribers.find((s) => s.peerId === "bob");
 			assert.ok(bob);
 			assert.equal(bob.queueDepth, 0);
 		});

@@ -65,12 +65,12 @@ switch (subcommand) {
 		await runServe();
 		break;
 	case "tail": {
-		const topicId = process.argv[3];
-		if (!topicId) {
-			process.stderr.write("usage: cc-messagebus tail <topicId>\n");
+		const peerId = process.argv[3];
+		if (!peerId) {
+			process.stderr.write("usage: cc-messagebus tail <peerId>\n");
 			process.exit(1);
 		}
-		await runTail(topicId, { baseUrl: process.env.CC_MESSAGEBUS_URL });
+		await runTail(peerId, { baseUrl: process.env.CC_MESSAGEBUS_URL });
 		break;
 	}
 	case "mcp":
