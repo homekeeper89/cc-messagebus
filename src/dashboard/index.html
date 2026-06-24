@@ -847,6 +847,12 @@
 				renderPeers();
 			}
 
+			function applyTopicSnapshot(topicList) {
+				topics.clear();
+				for (const t of topicList) topics.set(t.topicId, t);
+				renderTopics();
+			}
+
 			function applyRegistered(peer) {
 				sessions.set(peer.peerId, { ...peer, status: "connected" });
 				renderPeers();
@@ -938,6 +944,7 @@
 				es.addEventListener("session_snapshot", (e) => {
 					const data = JSON.parse(e.data);
 					applySnapshot(data.peers);
+					applyTopicSnapshot(data.topics ?? []);
 				});
 				es.addEventListener("session_registered", (e) => {
 					const data = JSON.parse(e.data);

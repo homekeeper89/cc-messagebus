@@ -124,6 +124,7 @@ describe("events SSE", () => {
 				(e) => e.type === "session_snapshot",
 			);
 			assert.deepEqual((snap as { peers: unknown[] }).peers, []);
+			assert.deepEqual((snap as { topics: unknown[] }).topics, []);
 
 			const hb = await readEvent(
 				reader,
@@ -389,6 +390,43 @@ describe("events SSE", () => {
 			const peers = (snap as { peers: { peerId: string }[] }).peers;
 			assert.equal(peers.length, 1);
 			assert.equal(peers[0].peerId, "alice");
+		} finally {
+			controller.abort();
+		}
+	});
+
+	test("late connect snapshot includes existing topics", async () => {
+		await fetch(`${baseUrl}/api/register`, {
+			method: "POST",
+			headers: { "content-type": "application/json" },
+			body: JSON.stringify({ peerId: "alice" }),
+		});
+		await fetch(`${baseUrl}/api/topic_create`, {
+			method: "POST",
+			headers: { "content-type": "application/json" },
+			body: JSON.stringify({ topicId: "#general", createdBy: "alice" }),
+		});
+
+		const controller = new AbortController();
+		try {
+			const res = await fetch(`${baseUrl}/events`, {
+				signal: controller.signal,
+				headers: { Accept: "text/event-stream" },
+			});
+			assert.ok(res.body);
+			const reader = res.body.getReader();
+			const decoder = new TextDecoder();
+			const buf = { value: "" };
+
+			const snap = await readEvent(
+				reader,
+				decoder,
+				buf,
+				(e) => e.type === "session_snapshot",
+			);
+			const topics = (snap as { topics: { topicId: string }[] }).topics;
+			assert.equal(topics.length, 1);
+			assert.equal(topics[0].topicId, "#general");
 		} finally {
 			controller.abort();
 		}
