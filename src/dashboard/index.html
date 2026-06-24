@@ -320,19 +320,96 @@
 				text-overflow: ellipsis;
 				white-space: nowrap;
 			}
-			#detail .card-list li[data-kind="history"] pre {
+			#detail .card-list li[data-kind="history"] .body {
 				display: none;
 				grid-column: 1 / -1;
 				margin: 6px 0 0;
-				padding: 8px;
+				padding: 10px 12px;
 				background: rgba(255, 255, 255, 0.04);
+				border-radius: 4px;
+				color: var(--text);
+				font-size: 13px;
+				line-height: 1.55;
+				word-break: break-word;
+			}
+			#detail .card-list li[data-kind="history"][data-open="1"] .body {
+				display: block;
+			}
+			#detail .card-list li[data-kind="history"] .body p {
+				margin: 0 0 8px;
+			}
+			#detail .card-list li[data-kind="history"] .body p:last-child {
+				margin: 0;
+			}
+			#detail .card-list li[data-kind="history"] .body h1,
+			#detail .card-list li[data-kind="history"] .body h2,
+			#detail .card-list li[data-kind="history"] .body h3 {
+				margin: 10px 0 6px;
+				font-size: 14px;
+				font-weight: 600;
+			}
+			#detail .card-list li[data-kind="history"] .body code {
+				font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+				background: rgba(255, 255, 255, 0.08);
+				padding: 1px 5px;
+				border-radius: 3px;
+				font-size: 12px;
+			}
+			#detail .card-list li[data-kind="history"] .body pre {
+				background: rgba(0, 0, 0, 0.25);
+				padding: 8px 10px;
+				border-radius: 4px;
+				overflow-x: auto;
+				margin: 6px 0;
+			}
+			#detail .card-list li[data-kind="history"] .body pre code {
+				background: none;
+				padding: 0;
+				font-size: 12px;
+			}
+			#detail .card-list li[data-kind="history"] .body ul,
+			#detail .card-list li[data-kind="history"] .body ol {
+				margin: 4px 0 8px;
+				padding-left: 22px;
+			}
+			#detail .card-list li[data-kind="history"] .body a {
+				color: var(--accent);
+			}
+			#detail .card-list li[data-kind="history"] .debug-toggle {
+				display: none;
+				grid-column: 1 / -1;
+				justify-self: start;
+				margin: 6px 0 0;
+				padding: 3px 10px;
+				background: none;
+				border: 1px solid var(--border);
+				border-radius: 3px;
+				color: var(--muted);
+				font-size: 11px;
+				cursor: pointer;
+				font-family: inherit;
+			}
+			#detail .card-list li[data-kind="history"][data-open="1"] .debug-toggle {
+				display: inline-block;
+			}
+			#detail .card-list li[data-kind="history"] .debug-toggle:hover {
+				color: var(--text);
+				border-color: var(--text);
+			}
+			#detail .card-list li[data-kind="history"] pre.debug {
+				display: none;
+				grid-column: 1 / -1;
+				margin: 4px 0 0;
+				padding: 8px 10px;
+				background: rgba(255, 255, 255, 0.03);
 				border-radius: 4px;
 				white-space: pre-wrap;
 				word-break: break-all;
-				color: var(--text);
-				font-size: 12px;
+				color: var(--muted);
+				font-size: 11px;
+				font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
 			}
-			#detail .card-list li[data-kind="history"][data-open="1"] pre {
+			#detail .card-list li[data-kind="history"][data-debug="1"] pre.debug {
 				display: block;
 			}
 		</style>
@@ -697,6 +774,77 @@
 				return li;
 			}
 
+			function escapeHtml(s) {
+				return s.replace(
+					/[&<>"']/g,
+					(c) =>
+						({
+							"&": "&amp;",
+							"<": "&lt;",
+							">": "&gt;",
+							'"': "&quot;",
+							"'": "&#39;",
+						})[c],
+				);
+			}
+
+			// 최소 markdown 렌더러: 헤딩/볼드/이탤릭/코드/링크/리스트/문단.
+			// XSS 방지를 위해 사용자 입력은 escape 한 뒤 화이트리스트 태그만 주입한다.
+			function renderMarkdown(src) {
+				if (!src) return "";
+				const codeBlocks = [];
+				let s = src.replace(
+					/```([a-zA-Z0-9_-]*)\n([\s\S]*?)```/g,
+					(_m, _lang, code) => {
+						codeBlocks.push(code.replace(/\n$/, ""));
+						return "__CBLOCK__" + (codeBlocks.length - 1) + "__END__";
+					},
+				);
+				const inlineCodes = [];
+				s = s.replace(/`([^`\n]+)`/g, (_m, code) => {
+					inlineCodes.push(code);
+					return "__INLCODE__" + (inlineCodes.length - 1) + "__END__";
+				});
+				s = escapeHtml(s);
+				s = s.replace(/^### (.+)$/gm, "<h3>$1</h3>");
+				s = s.replace(/^## (.+)$/gm, "<h2>$1</h2>");
+				s = s.replace(/^# (.+)$/gm, "<h1>$1</h1>");
+				s = s.replace(/\*\*([^*\n]+)\*\*/g, "<strong>$1</strong>");
+				s = s.replace(/(^|[^*\w])\*([^*\n]+)\*(?!\*)/g, "$1<em>$2</em>");
+				s = s.replace(
+					/\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g,
+					'<a href="$2" target="_blank" rel="noopener noreferrer">$1</a>',
+				);
+				s = s.replace(/(?:^|\n)((?:- [^\n]+\n?)+)/g, (m) => {
+					const items = m
+						.trim()
+						.split("\n")
+						.map((l) => "<li>" + l.replace(/^- /, "") + "</li>")
+						.join("");
+					return "\n<ul>" + items + "</ul>";
+				});
+				// 코드 블록은 paragraph 분할 전에 복원해서 <p>로 잘못 감싸지지 않게 한다.
+				s = s.replace(
+					/__CBLOCK__(\d+)__END__/g,
+					(_m, i) =>
+						"<pre><code>" + escapeHtml(codeBlocks[+i]) + "</code></pre>",
+				);
+				s = s
+					.split(/\n{2,}/)
+					.map((b) => {
+						const t = b.trim();
+						if (!t) return "";
+						if (/^<(h\d|ul|ol|pre|blockquote)/.test(t)) return t;
+						return "<p>" + t.replace(/\n/g, "<br>") + "</p>";
+					})
+					.join("\n");
+				s = s.replace(
+					/__INLCODE__(\d+)__END__/g,
+					(_m, i) => "<code>" + escapeHtml(inlineCodes[+i]) + "</code>",
+				);
+				return s;
+			}
+
 			function enterTopicDetail(topicId) {
 				flowHeaderEl.hidden = true;
 				flowEl.hidden = true;
@@ -781,10 +929,23 @@
 						const subj = document.createElement("span");
 						subj.className = "subject";
 						subj.textContent = m.subject;
-						const detail = document.createElement("pre");
-						detail.textContent = JSON.stringify(m, null, 2);
-						li.append(time, from, subj, detail);
-						li.addEventListener("click", () => {
+						const body = document.createElement("div");
+						body.className = "body";
+						body.innerHTML = renderMarkdown(m.body ?? "");
+						const debugBtn = document.createElement("button");
+						debugBtn.type = "button";
+						debugBtn.className = "debug-toggle";
+						debugBtn.textContent = "\ud83d\udd27 debug";
+						debugBtn.addEventListener("click", (e) => {
+							e.stopPropagation();
+							li.dataset.debug = li.dataset.debug === "1" ? "0" : "1";
+						});
+						const debug = document.createElement("pre");
+						debug.className = "debug";
+						debug.textContent = JSON.stringify(m, null, 2);
+						li.append(time, from, subj, body, debugBtn, debug);
+						li.addEventListener("click", (e) => {
+							if (e.target.closest(".debug-toggle")) return;
 							li.dataset.open = li.dataset.open === "1" ? "0" : "1";
 						});
 						return li;
