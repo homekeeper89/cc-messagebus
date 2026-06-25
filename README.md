@@ -4,7 +4,7 @@ Claude Code 세션 간 메시지 큐 + Pub-Sub 토픽 + 실시간 대시보드. 
 
 - **DM (1:1 메시지 큐)**: at-least-once, visibility timeout 30s, TTL 30일
 - **Pub-Sub Topic**: N:M fan-out, subscriber 별 독립 큐 + read/ack 라이프사이클, history 조회
-- **MCP stdio adapter**: Claude Code 에 DM 도구 (`register / send / read / ack / list_peers / unregister`) + 토픽 도구 (`list_topics / topic_create / topic_subscribe / topic_send / topic_unsubscribe / topic_history / topic_detail`) 노출
+- **MCP stdio adapter**: Claude Code 에 세션 도구 (`register / unregister / read / ack / list_peers`) + 토픽 도구 (`list_topics / topic_create / topic_subscribe / topic_send / topic_unsubscribe / topic_history / topic_detail`) 노출. 0.3.0 부터 1:1 DM `send` 는 MCP 노출에서 제외 (topic 사용 권장). HTTP `/send` RPC 는 운영자 도구용으로 유지.
 - **SSE 알림**: `cc-messagebus tail <peerId>` 가 stdout 으로 라인 푸시 → Claude `Monitor` 도구가 즉시 수신
 - **대시보드**: `http://127.0.0.1:5959/dashboard` 에서 등록 peer 목록 + topic 목록 + 메시지 흐름 라이브 관찰
 
@@ -52,23 +52,10 @@ npx cc-messagebus serve
 }
 ```
 
-### 2) DM (1:1) 흐름 예시
+### 2) Topic (Pub-Sub) 흐름 예시
 
-세션 A:
-```
-register({ peerId: "alice" })
-send({ to: "bob", subject: "ping", body: "안녕" })
-```
-
-세션 B:
-```
-register({ peerId: "bob" })
-# Monitor 가 자동으로 알림 라인 수신
-read({})            # 메시지 fetch (visibility timeout 30s 시작)
-ack({ messageId })  # 처리 완료 표시
-```
-
-### 3) Topic (Pub-Sub) 흐름 예시
+> 0.3.0 부터 agent 가 1:1 DM 으로 보내는 것은 차단됐습니다. 세션 간 통신은 topic 으로 합니다.
+> HTTP `/send` RPC 는 운영자 디버깅용으로 유지되며, topic fan-out delivery 가 이 inbox 인프라에 의존합니다.
 
 ```
 # 발행자
@@ -84,7 +71,7 @@ topic_unsubscribe({ topicId: "demo" })
 
 Topic 은 DM 과 동일한 visibility timeout / TTL 라이프사이클을 따르며, subscriber 별로 독립된 inbox 사본을 받습니다. publisher 자신은 자기 inbox 에 사본을 받지 않습니다.
 
-### 4) 대시보드
+### 3) 대시보드
 
 ```bash
 cc-messagebus dashboard
@@ -106,13 +93,14 @@ cc-messagebus dashboard
 
 `register` 호출 후 같은 세션의 모든 도구는 caller `peerId` / `from` 을 암묵적으로 사용하므로 args 에서 생략합니다. 성공 응답은 아래 "Returns" 의 JSON 객체가 그대로 반환되고, 실패 시 `{ ok: false, error: { code, message } }` 가 반환됩니다.
 
-### DM (1:1)
+### Session
+
+`send` (1:1 DM) 도구는 0.3.0 부터 MCP 노출에서 제외됐습니다 (agent 가 의도치 않게 DM 으로 보내는 동작 차단 목적). 메시지 송신은 `topic_send` 를 사용하세요. inbox 인프라 (`read` / `ack`) 는 topic fan-out delivery 가 의존하므로 그대로 유지됩니다.
 
 | Tool | Args | Returns | Errors |
 |---|---|---|---|
 | `register` | `{ peerId }` | `{ peerId, monitorCommand, dashboardUrl }` | `PEER_ALREADY_REGISTERED` |
 | `unregister` | `{ purgeQueue?: boolean }` | `{ purged: boolean }` | `PEER_NOT_FOUND` |
-| `send` | `{ to, subject, body, threadId? }` | `{ messageId, sentAt }` | `PEER_NOT_FOUND` |
 | `read` | `{ max?: number }` (default 50) | `{ messages: MessageDto[] }` | `PEER_NOT_FOUND` |
 | `ack` | `{ messageId }` | `{ ackedAt }` | `PEER_NOT_FOUND`, `MESSAGE_NOT_FOUND`, `MESSAGE_NOT_IN_FLIGHT` |
 | `list_peers` | `{}` | `{ peers: PeerDto[] }` (`lastActivityAt DESC NULLS LAST`) | — |

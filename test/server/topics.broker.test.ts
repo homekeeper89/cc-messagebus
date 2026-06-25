@@ -304,8 +304,12 @@ describe("broker topics", () => {
 			broker.topicSubscribe({ topicId: "ch-1", peerId: "carol" });
 
 			const received: string[] = [];
+			const kinds: string[] = [];
+			const topicIds: (string | undefined)[] = [];
 			broker.events.on("message_sent", (e) => {
 				received.push(e.message.to);
+				kinds.push(e.kind);
+				topicIds.push(e.topicId);
 			});
 
 			broker.topicSend({
@@ -325,6 +329,14 @@ describe("broker topics", () => {
 			assert.ok(
 				!received.includes("alice"),
 				"sender must not receive own message_sent",
+			);
+			assert.ok(
+				kinds.every((k) => k === "topic"),
+				"fanout message_sent events must carry kind='topic' (PR-D)",
+			);
+			assert.ok(
+				topicIds.every((t) => t === "ch-1"),
+				"fanout message_sent events must carry topicId for dashboard routing (PR-D)",
 			);
 		});
 	});

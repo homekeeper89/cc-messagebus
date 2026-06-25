@@ -54,6 +54,11 @@ export interface SessionDisconnectedEvent {
 export interface MessageSentEvent {
 	type: "message_sent";
 	message: MessageDto;
+	// "dm" = 1:1 send() 결과, "topic" = topicSend() fanout 결과.
+	// dashboard 는 PR-D 이후 dm 을 hide 한다 (DM 비활성화 정책).
+	kind: "dm" | "topic";
+	// kind === "topic" 일 때만 set. fanout 출처 topic 식별용.
+	topicId?: TopicId;
 }
 export interface MessageReadEvent {
 	type: "message_read";

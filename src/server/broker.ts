@@ -173,7 +173,7 @@ export function createBroker(db: CcDatabase, opts: BrokerOptions): Broker {
 		db.insertMessage(message);
 		db.touchLastSeen(req.from, now);
 		db.updateLastActivity(req.from, now);
-		emit({ type: "message_sent", message });
+		emit({ type: "message_sent", message, kind: "dm" });
 		return { messageId: message.id, sentAt: now };
 	}
 
@@ -377,7 +377,12 @@ export function createBroker(db: CcDatabase, opts: BrokerOptions): Broker {
 				ackedAt: null,
 				expiresAt,
 			};
-			emit({ type: "message_sent", message: fanoutMessage });
+			emit({
+				type: "message_sent",
+				message: fanoutMessage,
+				kind: "topic",
+				topicId: req.topicId,
+			});
 		});
 		emit({
 			type: "topic_message_published",
