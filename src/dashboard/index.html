@@ -741,6 +741,9 @@
 			}
 
 			function pushFlowMaybe(event) {
+				// PR-D: DM (1:1 send) 은 MCP 노출이 끊겼고 dashboard 에서도 숨긴다.
+				// HTTP /send RPC 는 운영자 도구용으로 살아있어 이벤트는 여전히 발생.
+				if (event.type === "message_sent" && event.kind === "dm") return;
 				flowBuffer.unshift(event);
 				if (flowBuffer.length > FLOW_BUFFER_CAP)
 					flowBuffer.length = FLOW_BUFFER_CAP;

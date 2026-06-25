@@ -71,7 +71,7 @@ Claude: "saturn으로 등록 완료. 대시보드: http://localhost:5959"
 |------|---------|------|
 | `register` | `{ peerId: string }` | 신규 등록. **중복 시 무조건 409 거부** |
 | `unregister` | `{ purgeQueue?: boolean }` | 본인 peer 제거. `purgeQueue` default `false` (큐 보존, 재등록 시 backlog 받음) |
-| `send` | `{ to, subject, body, threadId? }` | 메시지 전송. target offline이어도 큐 적재 |
+| ~~`send`~~ | ~~`{ to, subject, body, threadId? }`~~ | **0.3.0 PR-D부터 MCP 노출 제외.** Agent 가 1:1 DM 으로 보내는 동작 차단 목적. HTTP `/send` RPC + inbox (read/ack) 인프라는 topic delivery 가 의존하므로 유지. 송신은 `topic_send` 사용. |
 | `read` | `{ max?: number }` | 미수신 메시지 가져옴. **자동 ack 없음** (in-flight 상태로 마킹) |
 | `ack` | `{ messageId: string }` | 명시적 ack. 호출 전까지 in-flight 유지 |
 | `list_peers` | `{}` | 등록된 peer 목록 + 상태 |

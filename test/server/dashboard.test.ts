@@ -217,10 +217,24 @@ describe("events SSE", () => {
 				buf,
 				(e) => e.type === "message_sent",
 			);
-			const msg = (sent as { message: { to: string; subject: string } })
-				.message;
+			const sentEvent = sent as {
+				message: { to: string; subject: string };
+				kind: string;
+				topicId?: string;
+			};
+			const msg = sentEvent.message;
 			assert.equal(msg.to, "bob");
 			assert.equal(msg.subject, "ping");
+			assert.equal(
+				sentEvent.kind,
+				"dm",
+				"1:1 send must emit message_sent with kind='dm' (PR-D)",
+			);
+			assert.equal(
+				sentEvent.topicId,
+				undefined,
+				"DM message_sent must not carry topicId (PR-D)",
+			);
 
 			await fetch(`${baseUrl}/api/read`, {
 				method: "POST",
