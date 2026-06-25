@@ -245,7 +245,7 @@ describe("migration v1 → v2", () => {
 		assert.equal(dm?.topic_message_id, "cm-1");
 
 		const userVersion = raw.pragma("user_version", { simple: true });
-		assert.equal(userVersion, 2);
+		assert.equal(userVersion, 3);
 
 		raw.close();
 	});
@@ -264,7 +264,170 @@ describe("migration v1 → v2", () => {
 
 		const raw = new Database(dbPath, { readonly: true });
 		const userVersion = raw.pragma("user_version", { simple: true });
-		assert.equal(userVersion, 2);
+		assert.equal(userVersion, 3);
+		raw.close();
+	});
+});
+
+describe("migration v2 → v3 (messages.topic_message_id CASCADE)", () => {
+	let tmpDir: string;
+	let dbPath: string;
+
+	before(() => {
+		tmpDir = mkdtempSync(join(tmpdir(), "ccmb-migrate-v3-"));
+	});
+
+	after(() => {
+		rmSync(tmpDir, { recursive: true, force: true });
+	});
+
+	beforeEach(() => {
+		dbPath = join(tmpDir, `data-${Date.now()}-${Math.random()}.db`);
+	});
+
+	function seedV2Database(path: string): void {
+		const raw = new Database(path);
+		raw.pragma("foreign_keys = ON");
+		raw.exec(`
+			CREATE TABLE sessions (
+				peer_id TEXT PRIMARY KEY,
+				connected_at TEXT NOT NULL,
+				last_seen_at TEXT NOT NULL,
+				status TEXT NOT NULL,
+				last_activity_at TEXT
+			);
+			CREATE TABLE topics (
+				id TEXT PRIMARY KEY,
+				created_at TEXT NOT NULL,
+				created_by TEXT NOT NULL
+			);
+			CREATE TABLE topic_subscriptions (
+				topic_id TEXT NOT NULL REFERENCES topics(id) ON DELETE CASCADE,
+				subscriber_peer_id TEXT NOT NULL,
+				subscribed_at TEXT NOT NULL,
+				PRIMARY KEY (topic_id, subscriber_peer_id)
+			);
+			CREATE TABLE topic_messages (
+				id TEXT PRIMARY KEY,
+				topic_id TEXT NOT NULL REFERENCES topics(id) ON DELETE CASCADE,
+				from_peer_id TEXT NOT NULL,
+				subject TEXT NOT NULL,
+				body TEXT NOT NULL,
+				sent_at TEXT NOT NULL
+			);
+			CREATE TABLE messages (
+				id TEXT PRIMARY KEY,
+				from_peer TEXT NOT NULL,
+				to_peer TEXT NOT NULL,
+				subject TEXT NOT NULL,
+				body TEXT NOT NULL,
+				thread_id TEXT,
+				sent_at TEXT NOT NULL,
+				in_flight_until TEXT,
+				acked_at TEXT,
+				expires_at TEXT NOT NULL,
+				topic_message_id TEXT REFERENCES topic_messages(id) ON DELETE SET NULL
+			);
+		`);
+		raw.pragma("user_version = 2");
+
+		raw
+			.prepare(
+				"INSERT INTO sessions (peer_id, connected_at, last_seen_at, status) VALUES (?, ?, ?, ?)",
+			)
+			.run(
+				"alice",
+				"2026-06-19T00:00:00.000Z",
+				"2026-06-19T00:00:00.000Z",
+				"connected",
+			);
+		raw
+			.prepare(
+				"INSERT INTO topics (id, created_at, created_by) VALUES (?, ?, ?)",
+			)
+			.run("#general", "2026-06-19T00:00:00.000Z", "alice");
+		raw
+			.prepare(
+				"INSERT INTO topic_messages (id, topic_id, from_peer_id, subject, body, sent_at) VALUES (?, ?, ?, ?, ?, ?)",
+			)
+			.run(
+				"tm-1",
+				"#general",
+				"alice",
+				"hi",
+				"body",
+				"2026-06-19T00:00:01.000Z",
+			);
+		raw
+			.prepare(
+				"INSERT INTO messages (id, from_peer, to_peer, subject, body, thread_id, sent_at, expires_at, topic_message_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+			)
+			.run(
+				"m-fanout-1",
+				"alice",
+				"bob",
+				"hi",
+				"body",
+				null,
+				"2026-06-19T00:00:01.000Z",
+				"2027-06-19T00:00:01.000Z",
+				"tm-1",
+			);
+
+		raw.close();
+	}
+
+	test("test_migration_v2_to_v3_should_preserve_data_and_bump_version", () => {
+		seedV2Database(dbPath);
+
+		const db = openDatabase(dbPath);
+		db.close();
+
+		const raw = new Database(dbPath, { readonly: true });
+		assert.equal(raw.pragma("user_version", { simple: true }), 3);
+
+		const msg = raw
+			.prepare<[], { id: string; topic_message_id: string | null }>(
+				"SELECT id, topic_message_id FROM messages WHERE id = 'm-fanout-1'",
+			)
+			.get();
+		assert.equal(
+			msg?.topic_message_id,
+			"tm-1",
+			"fanout message must survive migration with FK intact",
+		);
+		raw.close();
+	});
+
+	test("test_migration_v2_to_v3_should_cascade_on_topic_delete", () => {
+		seedV2Database(dbPath);
+
+		const db = openDatabase(dbPath);
+		db.close();
+
+		const raw = new Database(dbPath);
+		raw.pragma("foreign_keys = ON");
+		raw.prepare("DELETE FROM topics WHERE id = ?").run("#general");
+
+		const topicMsgCount = raw
+			.prepare<[], { c: number }>("SELECT COUNT(*) AS c FROM topic_messages")
+			.get();
+		assert.equal(
+			topicMsgCount?.c,
+			0,
+			"topic_messages must cascade-delete via topics FK",
+		);
+
+		const fanoutCount = raw
+			.prepare<[], { c: number }>(
+				"SELECT COUNT(*) AS c FROM messages WHERE topic_message_id IS NOT NULL",
+			)
+			.get();
+		assert.equal(
+			fanoutCount?.c,
+			0,
+			"fanout messages must cascade-delete via topic_message_id FK (v3 schema)",
+		);
 		raw.close();
 	});
 });
