@@ -555,6 +555,193 @@
 			#issue-modal .status-line[data-state="ok"] {
 				color: #8f8;
 			}
+			.detail-actions {
+				display: flex;
+				gap: 8px;
+				margin: 8px 0 4px;
+				flex-wrap: wrap;
+			}
+			.detail-actions button {
+				background: transparent;
+				border: 1px solid var(--border);
+				border-radius: 4px;
+				color: var(--muted);
+				font-family: inherit;
+				font-size: 12px;
+				padding: 4px 10px;
+				cursor: pointer;
+			}
+			.detail-actions button:hover {
+				color: var(--text);
+				border-color: var(--text);
+			}
+			.detail-actions button.danger {
+				color: #ff7b72;
+				border-color: rgba(255, 123, 114, 0.4);
+			}
+			.detail-actions button.danger:hover {
+				border-color: #ff7b72;
+				background: rgba(255, 123, 114, 0.08);
+			}
+			.broadcast-form {
+				display: grid;
+				gap: 6px;
+				margin: 8px 0 12px;
+				padding: 10px;
+				border: 1px solid var(--border);
+				border-radius: 4px;
+				background: rgba(88, 166, 255, 0.04);
+			}
+			.broadcast-form[hidden] {
+				display: none;
+			}
+			.broadcast-form label {
+				display: grid;
+				gap: 3px;
+				font-size: 11px;
+				color: var(--muted);
+			}
+			.broadcast-form input,
+			.broadcast-form textarea {
+				background: var(--panel);
+				border: 1px solid var(--border);
+				border-radius: 3px;
+				color: var(--text);
+				font-family: inherit;
+				font-size: 13px;
+				padding: 5px 8px;
+			}
+			.broadcast-form textarea {
+				min-height: 70px;
+				resize: vertical;
+				font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+				font-size: 12px;
+			}
+			.broadcast-form .row {
+				display: flex;
+				gap: 8px;
+				justify-content: flex-end;
+			}
+			.broadcast-form .row button {
+				background: var(--accent);
+				border: 0;
+				border-radius: 3px;
+				color: #000;
+				font-family: inherit;
+				font-size: 12px;
+				font-weight: 600;
+				padding: 5px 12px;
+				cursor: pointer;
+			}
+			.broadcast-form .row button.ghost {
+				background: transparent;
+				color: var(--muted);
+				border: 1px solid var(--border);
+				font-weight: 400;
+			}
+			.broadcast-form .err {
+				color: #ff7b72;
+				font-size: 11px;
+				min-height: 1em;
+			}
+			.tree-list li .row-delete {
+				display: none;
+				background: transparent;
+				border: 0;
+				color: var(--muted);
+				cursor: pointer;
+				font-size: 14px;
+				padding: 0 4px;
+				margin-left: 4px;
+			}
+			.tree-list li:hover .row-delete {
+				display: inline-block;
+			}
+			.tree-list li .row-delete:hover {
+				color: #ff7b72;
+			}
+			.modal-backdrop {
+				position: fixed;
+				inset: 0;
+				background: rgba(0, 0, 0, 0.6);
+				display: grid;
+				place-items: center;
+				z-index: 100;
+			}
+			.modal-backdrop[hidden] {
+				display: none;
+			}
+			.modal {
+				background: var(--panel);
+				border: 1px solid var(--border);
+				border-radius: 6px;
+				padding: 18px 20px;
+				min-width: 320px;
+				max-width: 480px;
+			}
+			.modal h3 {
+				margin: 0 0 8px;
+				font-size: 14px;
+				color: #ff7b72;
+			}
+			.modal p {
+				margin: 0 0 10px;
+				font-size: 12px;
+				color: var(--muted);
+				line-height: 1.5;
+			}
+			.modal code {
+				background: rgba(255, 255, 255, 0.06);
+				padding: 1px 5px;
+				border-radius: 2px;
+				color: var(--text);
+				font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+			}
+			.modal input {
+				width: 100%;
+				background: #0d1117;
+				border: 1px solid var(--border);
+				border-radius: 3px;
+				color: var(--text);
+				font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+				font-size: 13px;
+				padding: 6px 8px;
+				margin-bottom: 6px;
+				box-sizing: border-box;
+			}
+			.modal .err {
+				color: #ff7b72;
+				font-size: 11px;
+				min-height: 1em;
+				margin-bottom: 6px;
+			}
+			.modal .row {
+				display: flex;
+				gap: 8px;
+				justify-content: flex-end;
+			}
+			.modal .row button {
+				font-family: inherit;
+				font-size: 12px;
+				padding: 5px 12px;
+				border-radius: 3px;
+				cursor: pointer;
+			}
+			.modal .row button.ghost {
+				background: transparent;
+				border: 1px solid var(--border);
+				color: var(--muted);
+			}
+			.modal .row button.danger {
+				background: #da3633;
+				border: 0;
+				color: #fff;
+				font-weight: 600;
+			}
+			.modal .row button.danger:disabled {
+				opacity: 0.4;
+				cursor: not-allowed;
+			}
 		</style>
 	</head>
 	<body>
@@ -599,6 +786,47 @@
 				<div id="detail" hidden>
 					<h2 id="detail-title">#</h2>
 					<p id="detail-meta" class="muted-line"></p>
+					<div class="detail-actions">
+						<button type="button" id="broadcast-toggle">📢 Broadcast</button>
+						<button type="button" id="topic-delete" class="danger">🗑 Delete topic</button>
+					</div>
+					<form id="broadcast-form" class="broadcast-form" hidden>
+						<label>
+							From (operator name)
+							<input
+								type="text"
+								id="broadcast-from"
+								name="from"
+								placeholder="operator"
+								maxlength="64"
+								required
+							/>
+						</label>
+						<label>
+							Subject
+							<input
+								type="text"
+								id="broadcast-subject"
+								name="subject"
+								maxlength="256"
+								required
+							/>
+						</label>
+						<label>
+							Body (markdown)
+							<textarea
+								id="broadcast-body"
+								name="body"
+								maxlength="65536"
+								required
+							></textarea>
+						</label>
+						<p class="err" id="broadcast-err"></p>
+						<div class="row">
+							<button type="button" class="ghost" id="broadcast-cancel">Cancel</button>
+							<button type="submit">Send</button>
+						</div>
+					</form>
 					<h3 class="section-h">
 						Subscribers <span id="detail-subscribers-count">(0)</span>
 					</h3>
@@ -654,6 +882,19 @@
 				</div>
 			</form>
 		</dialog>
+		<div id="confirm-modal" class="modal-backdrop" hidden>
+			<div class="modal" role="dialog" aria-modal="true">
+				<h3 id="confirm-title">Confirm deletion</h3>
+				<p id="confirm-body"></p>
+				<p>Type <code id="confirm-expected"></code> to confirm:</p>
+				<input type="text" id="confirm-input" autocomplete="off" />
+				<p class="err" id="confirm-err"></p>
+				<div class="row">
+					<button type="button" class="ghost" id="confirm-cancel">Cancel</button>
+					<button type="button" class="danger" id="confirm-ok" disabled>Delete</button>
+				</div>
+			</div>
+		</div>
 		<script type="module">
 			const FLOW_CAP = 500;
 			const FLOW_BUFFER_CAP = 500;
@@ -687,6 +928,24 @@
 			);
 			const detailHistEl = document.getElementById("detail-history");
 			const detailHistMetaEl = document.getElementById("detail-history-meta");
+			const broadcastToggleBtn = document.getElementById("broadcast-toggle");
+			const broadcastForm = document.getElementById("broadcast-form");
+			const broadcastFromEl = document.getElementById("broadcast-from");
+			const broadcastSubjectEl = document.getElementById("broadcast-subject");
+			const broadcastBodyEl = document.getElementById("broadcast-body");
+			const broadcastErrEl = document.getElementById("broadcast-err");
+			const broadcastCancelBtn = document.getElementById("broadcast-cancel");
+			const topicDeleteBtn = document.getElementById("topic-delete");
+			const confirmModal = document.getElementById("confirm-modal");
+			const confirmTitleEl = document.getElementById("confirm-title");
+			const confirmBodyEl = document.getElementById("confirm-body");
+			const confirmExpectedEl = document.getElementById("confirm-expected");
+			const confirmInputEl = document.getElementById("confirm-input");
+			const confirmErrEl = document.getElementById("confirm-err");
+			const confirmOkBtn = document.getElementById("confirm-ok");
+			const confirmCancelBtn = document.getElementById("confirm-cancel");
+
+			let pendingConfirm = null;
 
 			function setStatus(state, text) {
 				statusEl.dataset.state = state;
@@ -770,7 +1029,16 @@
 						const meta = document.createElement("span");
 						meta.className = "meta";
 						meta.textContent = relativeAgo(p.lastActivityAt);
-						li.append(dot, name, meta);
+						const del = document.createElement("button");
+						del.type = "button";
+						del.className = "row-delete";
+						del.title = "Delete peer";
+						del.textContent = "🗑";
+						del.addEventListener("click", (e) => {
+							e.stopPropagation();
+							requestPeerDelete(p.peerId);
+						});
+						li.append(dot, name, meta, del);
 						li.addEventListener("click", () =>
 							onTreeRowClick({ type: "agent", peerId: p.peerId }),
 						);
@@ -1056,6 +1324,130 @@
 					clearTimeout(historyRefreshTimer);
 					historyRefreshTimer = null;
 				}
+				broadcastForm.hidden = true;
+				broadcastErrEl.textContent = "";
+			}
+
+			function openConfirmModal({ title, body, expected, onConfirm }) {
+				pendingConfirm = { expected, onConfirm };
+				confirmTitleEl.textContent = title;
+				confirmBodyEl.textContent = body;
+				confirmExpectedEl.textContent = expected;
+				confirmInputEl.value = "";
+				confirmErrEl.textContent = "";
+				confirmOkBtn.disabled = true;
+				confirmModal.hidden = false;
+				confirmInputEl.focus();
+			}
+
+			function closeConfirmModal() {
+				confirmModal.hidden = true;
+				pendingConfirm = null;
+			}
+
+			confirmInputEl.addEventListener("input", () => {
+				if (!pendingConfirm) return;
+				confirmOkBtn.disabled =
+					confirmInputEl.value !== pendingConfirm.expected;
+				confirmErrEl.textContent = "";
+			});
+			confirmCancelBtn.addEventListener("click", closeConfirmModal);
+			confirmModal.addEventListener("click", (e) => {
+				if (e.target === confirmModal) closeConfirmModal();
+			});
+			confirmOkBtn.addEventListener("click", async () => {
+				if (!pendingConfirm) return;
+				if (confirmInputEl.value !== pendingConfirm.expected) return;
+				confirmOkBtn.disabled = true;
+				try {
+					await pendingConfirm.onConfirm();
+					closeConfirmModal();
+				} catch (err) {
+					confirmErrEl.textContent =
+						err instanceof Error ? err.message : String(err);
+					confirmOkBtn.disabled = false;
+				}
+			});
+
+			async function postJson(path, payload) {
+				const res = await fetch(path, {
+					method: "POST",
+					headers: { "Content-Type": "application/json" },
+					body: JSON.stringify(payload),
+				});
+				const json = await res.json().catch(() => null);
+				if (!res.ok || !json?.ok) {
+					const msg =
+						json?.error?.message ?? `HTTP ${res.status} ${res.statusText}`;
+					throw new Error(msg);
+				}
+				return json;
+			}
+
+			broadcastToggleBtn.addEventListener("click", () => {
+				broadcastForm.hidden = !broadcastForm.hidden;
+				broadcastErrEl.textContent = "";
+				if (!broadcastForm.hidden) broadcastSubjectEl.focus();
+			});
+			broadcastCancelBtn.addEventListener("click", () => {
+				broadcastForm.hidden = true;
+				broadcastErrEl.textContent = "";
+			});
+			broadcastForm.addEventListener("submit", async (e) => {
+				e.preventDefault();
+				if (!topicDetail) return;
+				const from = broadcastFromEl.value.trim();
+				const subject = broadcastSubjectEl.value.trim();
+				const body = broadcastBodyEl.value;
+				if (!from || !subject || !body) {
+					broadcastErrEl.textContent = "from / subject / body required";
+					return;
+				}
+				broadcastErrEl.textContent = "";
+				try {
+					await postJson("/api/channel_broadcast", {
+						topicId: topicDetail.topicId,
+						from,
+						subject,
+						body,
+					});
+					broadcastSubjectEl.value = "";
+					broadcastBodyEl.value = "";
+					broadcastForm.hidden = true;
+				} catch (err) {
+					broadcastErrEl.textContent =
+						err instanceof Error ? err.message : String(err);
+				}
+			});
+
+			topicDeleteBtn.addEventListener("click", () => {
+				if (!topicDetail) return;
+				const topicId = topicDetail.topicId;
+				openConfirmModal({
+					title: "Delete topic",
+					body: `Channel "${topicId}" and all its messages will be removed.`,
+					expected: topicId,
+					onConfirm: async () => {
+						await postJson("/api/channel_delete", {
+							topicId,
+							confirm: topicId,
+						});
+					},
+				});
+			});
+
+			function requestPeerDelete(peerId) {
+				openConfirmModal({
+					title: "Delete peer",
+					body: `Peer "${peerId}" subscriptions and inbox will be removed.`,
+					expected: peerId,
+					onConfirm: async () => {
+						await postJson("/api/peer_delete", {
+							peerId,
+							confirm: peerId,
+						});
+					},
+				});
 			}
 
 			function renderDetailHeader() {
@@ -1430,6 +1822,33 @@
 						};
 						renderDetailSubscribers();
 						scheduleHistoryRefresh();
+					}
+				});
+				es.addEventListener("topic_deleted", (e) => {
+					const data = JSON.parse(e.data);
+					topics.delete(data.topicId);
+					renderTopics();
+					if (
+						isDetailMode() &&
+						selectedContext.topicId === data.topicId
+					) {
+						exitTopicDetail();
+						selectedContext = { type: "all" };
+						renderTreeSelection();
+						renderFlowHeader();
+					}
+				});
+				es.addEventListener("peer_deleted", (e) => {
+					const data = JSON.parse(e.data);
+					sessions.delete(data.peerId);
+					renderPeers();
+					if (
+						selectedContext.type === "agent" &&
+						selectedContext.peerId === data.peerId
+					) {
+						selectedContext = { type: "all" };
+						renderTreeSelection();
+						renderFlowHeader();
 					}
 				});
 			}

@@ -5,8 +5,11 @@ import Fastify, { type FastifyError, type FastifyInstance } from "fastify";
 import { type ErrorCode, errorCodeToHttpStatus } from "../protocol/errors.js";
 import {
 	type AckRequest,
+	type ChannelBroadcastRequest,
+	type ChannelDeleteRequest,
 	HTTP_ENDPOINTS,
 	type IssueCreateRequest,
+	type PeerDeleteRequest,
 	type ReadRequest,
 	type RegisterRequest,
 	type SendRequest,
@@ -185,6 +188,30 @@ const ISSUE_CREATE_BODY = {
 	required: ["type", "title", "body"],
 	additionalProperties: false,
 };
+const CHANNEL_BROADCAST_BODY = {
+	type: "object",
+	properties: {
+		topicId: TOPIC_ID_SCHEMA,
+		from: PEER_ID_SCHEMA,
+		subject: SUBJECT_SCHEMA,
+		body: BODY_SCHEMA,
+	},
+	required: ["topicId", "from", "subject", "body"],
+	additionalProperties: false,
+};
+const CONFIRM_SCHEMA = { type: "string", maxLength: 64 };
+const CHANNEL_DELETE_BODY = {
+	type: "object",
+	properties: { topicId: TOPIC_ID_SCHEMA, confirm: CONFIRM_SCHEMA },
+	required: ["topicId", "confirm"],
+	additionalProperties: false,
+};
+const PEER_DELETE_BODY = {
+	type: "object",
+	properties: { peerId: PEER_ID_SCHEMA, confirm: CONFIRM_SCHEMA },
+	required: ["peerId", "confirm"],
+	additionalProperties: false,
+};
 
 export interface ServerOptions {
 	host?: string;
@@ -341,6 +368,24 @@ export function createServer(opts: ServerOptions): Server {
 		HTTP_ENDPOINTS.issueCreate.path,
 		{ schema: { body: ISSUE_CREATE_BODY } },
 		async (req) => ({ ok: true, ...(await broker.issueCreate(req.body)) }),
+	);
+
+	app.post<{ Body: ChannelBroadcastRequest }>(
+		HTTP_ENDPOINTS.channelBroadcast.path,
+		{ schema: { body: CHANNEL_BROADCAST_BODY } },
+		async (req) => ({ ok: true, ...broker.channelBroadcast(req.body) }),
+	);
+
+	app.post<{ Body: ChannelDeleteRequest }>(
+		HTTP_ENDPOINTS.channelDelete.path,
+		{ schema: { body: CHANNEL_DELETE_BODY } },
+		async (req) => ({ ok: true, ...broker.channelDelete(req.body) }),
+	);
+
+	app.post<{ Body: PeerDeleteRequest }>(
+		HTTP_ENDPOINTS.peerDelete.path,
+		{ schema: { body: PEER_DELETE_BODY } },
+		async (req) => ({ ok: true, ...broker.peerDelete(req.body) }),
 	);
 
 	app.get<{ Params: { peerId: string } }>(
