@@ -24,7 +24,6 @@ import {
 import {
 	DASHBOARD_EVENT_TYPES,
 	type DashboardEvent,
-	type MessageSentEvent,
 	serializeSseEvent,
 } from "../protocol/sse.js";
 import {
@@ -386,71 +385,6 @@ export function createServer(opts: ServerOptions): Server {
 		HTTP_ENDPOINTS.peerDelete.path,
 		{ schema: { body: PEER_DELETE_BODY } },
 		async (req) => ({ ok: true, ...broker.peerDelete(req.body) }),
-	);
-
-	app.get<{ Params: { peerId: string } }>(
-		"/tail/:peerId",
-		async (req, reply) => {
-			const { peerId } = req.params;
-			const session = db.getSession(peerId);
-			if (!session) {
-				const code: ErrorCode = "PEER_NOT_FOUND";
-				reply.code(errorCodeToHttpStatus[code]).send({
-					ok: false,
-					error: { code, message: `peer '${peerId}' is not registered` },
-				});
-				return;
-			}
-
-			reply.hijack();
-			const raw = reply.raw;
-			raw.writeHead(200, {
-				"Content-Type": "text/event-stream",
-				"Cache-Control": "no-cache, no-transform",
-				Connection: "keep-alive",
-				"X-Accel-Buffering": "no",
-			});
-			// 첫 byte 가 없으면 클라이언트 fetch 가 headers 를 못 받아 timeout.
-			raw.flushHeaders();
-
-			let closed = false;
-			const cleanup = (): void => {
-				if (closed) return;
-				closed = true;
-				broker.events.off("message_sent", listener);
-			};
-			// EPIPE 등 write 실패 시 cleanup 만 수행하고 throw 막음
-			const safeWrite = (chunk: string): void => {
-				try {
-					raw.write(chunk);
-				} catch {
-					cleanup();
-				}
-			};
-
-			const listener = (event: MessageSentEvent): void => {
-				if (event.message.to !== peerId) return;
-				safeWrite(
-					serializeSseEvent({
-						type: "message_delivered",
-						message: event.message,
-					}),
-				);
-			};
-			broker.events.on("message_sent", listener);
-
-			raw.on("close", () => {
-				cleanup();
-				try {
-					broker.disconnect(peerId);
-				} catch (e) {
-					// 서버 shutdown 후 socket close 가 늦게 도착하면 db 가 닫혀있는 race 만 무시.
-					// 그 외 예외는 진짜 버그이므로 로깅하지 않고 다시 던져서 에러 핸들러에 노출.
-					const msg = e instanceof Error ? e.message : String(e);
-					if (!msg.includes("database connection is not open")) throw e;
-				}
-			});
-		},
 	);
 
 	app.get("/dashboard", async (_req, reply) => {

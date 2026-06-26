@@ -10,16 +10,6 @@ import type {
 	TopicSummaryDto,
 } from "./http.js";
 
-export const TAIL_EVENT_TYPES = {
-	messageDelivered: "message_delivered",
-} as const;
-
-export interface MessageDeliveredEvent {
-	type: "message_delivered";
-	message: MessageDto;
-}
-export type TailEvent = MessageDeliveredEvent;
-
 export const DASHBOARD_EVENT_TYPES = {
 	sessionSnapshot: "session_snapshot",
 	sessionRegistered: "session_registered",
@@ -147,4 +137,32 @@ export function serializeSseEvent<T extends { type: string }>(
 	const lines = [`event: ${event.type}`, `data: ${JSON.stringify(event)}`];
 	if (id !== undefined) lines.push(`id: ${id}`);
 	return `${lines.join("\n")}\n\n`;
+}
+
+export interface ParseSseChunksResult {
+	events: DashboardEvent[];
+	rest: string;
+}
+
+export function parseSseChunks(buffer: string): ParseSseChunksResult {
+	const events: DashboardEvent[] = [];
+	let cursor = 0;
+	while (true) {
+		const boundary = buffer.indexOf("\n\n", cursor);
+		if (boundary === -1) break;
+		const block = buffer.slice(cursor, boundary);
+		cursor = boundary + 2;
+		for (const line of block.split("\n")) {
+			if (line.startsWith(":")) continue;
+			if (!line.startsWith("data:")) continue;
+			const payload = line.slice(5).trimStart();
+			if (!payload) continue;
+			try {
+				events.push(JSON.parse(payload) as DashboardEvent);
+			} catch {
+				// ill-formed payload silently dropped; broker emits valid JSON only
+			}
+		}
+	}
+	return { events, rest: buffer.slice(cursor) };
 }

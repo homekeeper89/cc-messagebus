@@ -10,7 +10,7 @@ import {
 	describe,
 	test,
 } from "node:test";
-import { parseSseChunks } from "../../src/client/tail.js";
+import { parseSseChunks } from "../../src/protocol/sse.js";
 import { createServer, type Server } from "../../src/server/index.js";
 
 describe("dashboard html", () => {
