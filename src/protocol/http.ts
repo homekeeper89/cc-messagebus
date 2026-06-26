@@ -89,6 +89,9 @@ export const HTTP_ENDPOINTS = {
 	topicDetail: { method: "POST", path: "/api/topic_detail" },
 	diagnostics: { method: "POST", path: "/api/diagnostics" },
 	issueCreate: { method: "POST", path: "/api/issue_create" },
+	channelBroadcast: { method: "POST", path: "/api/channel_broadcast" },
+	channelDelete: { method: "POST", path: "/api/channel_delete" },
+	peerDelete: { method: "POST", path: "/api/peer_delete" },
 } as const;
 
 export interface RegisterRequest {
@@ -236,6 +239,38 @@ export interface IssueCreateResponse {
 	url: string;
 }
 
+export interface ChannelBroadcastRequest {
+	topicId: TopicId;
+	from: PeerId;
+	subject: string;
+	body: string;
+}
+export interface ChannelBroadcastResponse {
+	topicMessageId: TopicMessageId;
+	deliveredTo: PeerId[];
+	sentAt: IsoTimestamp;
+}
+
+// confirm must strictly equal topicId; otherwise broker rejects with VALIDATION_FAILED.
+export interface ChannelDeleteRequest {
+	topicId: TopicId;
+	confirm: string;
+}
+export interface ChannelDeleteResponse {
+	deletedMessages: number;
+	deletedSubs: number;
+}
+
+// confirm must strictly equal peerId; otherwise broker rejects with VALIDATION_FAILED.
+export interface PeerDeleteRequest {
+	peerId: PeerId;
+	confirm: string;
+}
+export interface PeerDeleteResponse {
+	deletedSubs: number;
+	cancelledInflight: number;
+}
+
 export type RegisterApiResponse = ApiResponse<RegisterResponse>;
 export type UnregisterApiResponse = ApiResponse<UnregisterResponse>;
 export type SendApiResponse = ApiResponse<SendResponse>;
@@ -251,3 +286,6 @@ export type TopicHistoryApiResponse = ApiResponse<TopicHistoryResponse>;
 export type TopicDetailApiResponse = ApiResponse<TopicDetailResponse>;
 export type DiagnosticsApiResponse = ApiResponse<DiagnosticsResponse>;
 export type IssueCreateApiResponse = ApiResponse<IssueCreateResponse>;
+export type ChannelBroadcastApiResponse = ApiResponse<ChannelBroadcastResponse>;
+export type ChannelDeleteApiResponse = ApiResponse<ChannelDeleteResponse>;
+export type PeerDeleteApiResponse = ApiResponse<PeerDeleteResponse>;
