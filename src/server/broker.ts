@@ -4,6 +4,9 @@ import type { ErrorCode } from "../protocol/errors.js";
 import type {
 	AckRequest,
 	AckResponse,
+	DiagnosticsResponse,
+	IssueCreateRequest,
+	IssueCreateResponse,
 	ListPeersResponse,
 	ListTopicsResponse,
 	MessageDto,
@@ -11,6 +14,8 @@ import type {
 	PeerId,
 	ReadRequest,
 	ReadResponse,
+	RecentErrorEntry,
+	RecentRpcEntry,
 	RegisterRequest,
 	RegisterResponse,
 	SendRequest,
@@ -35,6 +40,7 @@ import type {
 } from "../protocol/http.js";
 import type { DashboardEvent } from "../protocol/sse.js";
 import { type CcDatabase, DbError } from "./db.js";
+import { type IssueClient, IssueClientError } from "./issue.js";
 
 export class BrokerError extends Error {
 	constructor(
@@ -51,8 +57,13 @@ export interface BrokerOptions {
 	visibilityTimeoutSec: number;
 	ttlDays: number;
 	dashboardUrl: string;
+	version: string;
+	getDbSizeByte: () => number;
+	issueClient: IssueClient | null;
 	// 테스트에서 monotonic timestamp 주입 hook. production 은 default 사용.
 	clock?: () => string;
+	// 테스트에서 uptime 고정용. production 은 Date.now() 기본.
+	nowMs?: () => number;
 }
 
 export interface Broker {
@@ -71,10 +82,13 @@ export interface Broker {
 	topicUnsubscribe: (req: TopicUnsubscribeRequest) => TopicUnsubscribeResponse;
 	topicHistory: (req: TopicHistoryRequest) => TopicHistoryResponse;
 	topicDetail: (req: TopicDetailRequest) => TopicDetailResponse;
+	diagnostics: () => DiagnosticsResponse;
+	issueCreate: (req: IssueCreateRequest) => Promise<IssueCreateResponse>;
 }
 
 const HISTORY_LIMIT_DEFAULT = 50;
 export const HISTORY_LIMIT_MAX = 200;
+export const RING_BUFFER_CAPACITY = 50;
 
 const READ_MAX_DEFAULT = 50;
 const MS_PER_DAY = 24 * 60 * 60 * 1000;
@@ -90,6 +104,75 @@ function plusDays(iso: string, days: number): string {
 
 export function createBroker(db: CcDatabase, opts: BrokerOptions): Broker {
 	const nowIso = opts.clock ?? ((): string => new Date().toISOString());
+	const nowMs = opts.nowMs ?? ((): number => Date.now());
+	const startedAtMs = nowMs();
+	const recentRpcList: RecentRpcEntry[] = [];
+	const recentErrorList: RecentErrorEntry[] = [];
+
+	function pushRing<T>(buf: T[], entry: T): void {
+		buf.push(entry);
+		if (buf.length > RING_BUFFER_CAPACITY) buf.shift();
+	}
+
+	function errorMessage(e: unknown): string {
+		return e instanceof Error ? e.message : String(e);
+	}
+
+	function recordRpc(
+		method: string,
+		startedMs: number,
+		error: unknown,
+	): void {
+		const at = nowIso();
+		pushRing(recentRpcList, {
+			method,
+			durationMs: nowMs() - startedMs,
+			error: error === undefined ? null : errorMessage(error),
+			at,
+		});
+		if (error !== undefined) {
+			pushRing(recentErrorList, {
+				message: errorMessage(error),
+				stack: error instanceof Error ? (error.stack ?? null) : null,
+				at,
+			});
+		}
+	}
+
+	function instrument<Args extends unknown[], R>(
+		method: string,
+		fn: (...args: Args) => R,
+	): (...args: Args) => R {
+		return (...args: Args): R => {
+			const start = nowMs();
+			try {
+				const result = fn(...args);
+				recordRpc(method, start, undefined);
+				return result;
+			} catch (e) {
+				recordRpc(method, start, e);
+				throw e;
+			}
+		};
+	}
+
+	function instrumentAsync<Args extends unknown[], R>(
+		method: string,
+		fn: (...args: Args) => Promise<R>,
+	): (...args: Args) => Promise<R> {
+		return async (...args: Args): Promise<R> => {
+			const start = nowMs();
+			try {
+				const result = await fn(...args);
+				recordRpc(method, start, undefined);
+				return result;
+			} catch (e) {
+				recordRpc(method, start, e);
+				throw e;
+			}
+		};
+	}
+
 	const events = new EventEmitter();
 	// dashboard /events 와 /tail 다중 연결 시 listener 가 빠르게 누적되어
 	// 정상 동작인데도 MaxListenersExceededWarning 이 stderr 로 새는 것을 방지.
@@ -497,21 +580,58 @@ export function createBroker(db: CcDatabase, opts: BrokerOptions): Broker {
 		return { topic: detail };
 	}
 
+	function diagnostics(): DiagnosticsResponse {
+		return {
+			version: opts.version,
+			uptimeSec: Math.floor((nowMs() - startedAtMs) / 1000),
+			nodeVersion: process.version,
+			topicCount: db.listTopicSummaries().length,
+			peerCount: db.listSessions().length,
+			dbSizeByte: opts.getDbSizeByte(),
+			recentRpcList: [...recentRpcList],
+			recentErrorList: [...recentErrorList],
+		};
+	}
+
+	async function issueCreate(
+		req: IssueCreateRequest,
+	): Promise<IssueCreateResponse> {
+		if (!opts.issueClient) {
+			throw new BrokerError(
+				"ISSUE_REPO_NOT_CONFIGURED",
+				"issueRepo is not configured in ~/.cc-messagebus/config.json",
+			);
+		}
+		try {
+			const result = await opts.issueClient.create(req);
+			return { issueNumber: result.issueNumber, url: result.url };
+		} catch (e) {
+			if (e instanceof IssueClientError) {
+				throw new BrokerError("ISSUE_CLIENT_FAILED", e.message, e.details);
+			}
+			throw e;
+		}
+	}
+
 	return {
 		events,
-		register,
-		unregister,
-		send,
-		read,
-		ack,
-		listPeers,
-		listTopics,
+		register: instrument("register", register),
+		unregister: instrument("unregister", unregister),
+		send: instrument("send", send),
+		read: instrument("read", read),
+		ack: instrument("ack", ack),
+		listPeers: instrument("listPeers", listPeers),
+		listTopics: instrument("listTopics", listTopics),
+		// disconnect 는 SSE close 콜백 — RPC 가 아니므로 ring 기록 제외.
 		disconnect,
-		topicCreate,
-		topicSubscribe,
-		topicSend,
-		topicUnsubscribe,
-		topicHistory,
-		topicDetail,
+		topicCreate: instrument("topicCreate", topicCreate),
+		topicSubscribe: instrument("topicSubscribe", topicSubscribe),
+		topicSend: instrument("topicSend", topicSend),
+		topicUnsubscribe: instrument("topicUnsubscribe", topicUnsubscribe),
+		topicHistory: instrument("topicHistory", topicHistory),
+		topicDetail: instrument("topicDetail", topicDetail),
+		// diagnostics 자체는 ring 기록 제외 — snapshot 호출이 자기 자신을 오염시키는 노이즈 방지.
+		diagnostics,
+		issueCreate: instrumentAsync("issueCreate", issueCreate),
 	};
 }
