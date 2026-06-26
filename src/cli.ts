@@ -47,7 +47,7 @@ function printUsage(): void {
 			"Usage:",
 			"  cc-messagebus serve              start the broker daemon",
 			"  cc-messagebus mcp                MCP stdio adapter (Phase 6)",
-			"  cc-messagebus tail <topicId>     subscribe to a topic via SSE",
+			"  cc-messagebus tail <peerId>      poll inbox and print messages",
 			"  cc-messagebus status             show broker status (Phase 5)",
 			"  cc-messagebus dashboard          open dashboard (Phase 7)",
 			"",
