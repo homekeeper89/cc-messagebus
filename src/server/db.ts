@@ -47,6 +47,7 @@ CREATE TABLE IF NOT EXISTS topic_subscriptions (
 	topic_id TEXT NOT NULL REFERENCES topics(id) ON DELETE CASCADE,
 	subscriber_peer_id TEXT NOT NULL,
 	subscribed_at TEXT NOT NULL,
+	last_seen_message_id TEXT REFERENCES topic_messages(id) ON DELETE SET NULL,
 	PRIMARY KEY (topic_id, subscriber_peer_id)
 );
 
@@ -104,6 +105,10 @@ DROP INDEX IF EXISTS idx_messages_delivery;
 CREATE INDEX IF NOT EXISTS idx_topic_messages_topic_sent ON topic_messages (topic_id, sent_at);
 CREATE INDEX IF NOT EXISTS idx_topic_subscriptions_subscriber ON topic_subscriptions (subscriber_peer_id);
 CREATE INDEX IF NOT EXISTS idx_messages_delivery ON messages (to_peer, acked_at, in_flight_until);
+`;
+
+const MIGRATE_V3_TO_V4_SQL = `
+ALTER TABLE topic_subscriptions ADD COLUMN last_seen_message_id TEXT REFERENCES topic_messages(id) ON DELETE SET NULL;
 `;
 
 // SQLite cannot ALTER an existing FK clause. v3 rebuilds messages so that
@@ -250,6 +255,19 @@ function migrateV2ToV3(db: Database.Database): void {
 	}
 }
 
+function migrateV3ToV4(db: Database.Database): void {
+	db.pragma("foreign_keys = OFF");
+	try {
+		const tx = db.transaction(() => {
+			db.exec(MIGRATE_V3_TO_V4_SQL);
+			db.pragma("user_version = 4");
+		});
+		tx();
+	} finally {
+		db.pragma("foreign_keys = ON");
+	}
+}
+
 export function openDatabase(dbPath: string) {
 	mkdirSync(dirname(dbPath), { recursive: true });
 	const db = new Database(dbPath);
@@ -270,7 +288,7 @@ export function openDatabase(dbPath: string) {
 	db.exec(SCHEMA_DDL);
 
 	if (isFreshDb) {
-		db.pragma("user_version = 3");
+		db.pragma("user_version = 4");
 	}
 
 	let userVersion = db.pragma("user_version", { simple: true }) as number;
@@ -281,6 +299,10 @@ export function openDatabase(dbPath: string) {
 	if (userVersion === 2) {
 		migrateV2ToV3(db);
 		userVersion = 3;
+	}
+	if (userVersion === 3) {
+		migrateV3ToV4(db);
+		userVersion = 4;
 	}
 
 	const stmtGetSession = db.prepare<[string], SessionRow>(
