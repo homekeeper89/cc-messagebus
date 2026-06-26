@@ -141,6 +141,14 @@ export async function dispatch(
 				topicId: args.topicId as string,
 			});
 		}
+		case MCP_TOOL_NAMES.topicMonitor: {
+			const peerId = requirePeerId();
+			return client.topicMonitor({
+				topicId: args.topicId as string,
+				peerId,
+				max: args.max as number | undefined,
+			});
+		}
 		default:
 			throw new McpClientError("UNKNOWN_TOOL", `unknown tool: ${name}`);
 	}
