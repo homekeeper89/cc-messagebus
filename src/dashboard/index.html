@@ -766,12 +766,6 @@
 					</ul>
 				</div>
 				<div class="tree-section">
-					<h2>DMs</h2>
-					<div class="tree-row" id="tree-dms">
-						<span class="tree-label">DMs</span>
-					</div>
-				</div>
-				<div class="tree-section">
 					<h2>Topics <span id="topics-count">(0)</span></h2>
 					<ul id="topics" class="tree-list">
 						<li class="empty">(no topics)</li>
@@ -914,7 +908,6 @@
 			const topicsEl = document.getElementById("topics");
 			const topicsCountEl = document.getElementById("topics-count");
 			const treeAllEl = document.getElementById("tree-all");
-			const treeDmsEl = document.getElementById("tree-dms");
 			const flowEl = document.getElementById("flow");
 			const flowHeaderEl = document.getElementById("flow-header");
 			const statusEl = document.getElementById("status");
@@ -985,7 +978,6 @@
 
 			function renderTreeSelection() {
 				treeAllEl.dataset.selected = selectedContext.type === "all" ? "1" : "0";
-				treeDmsEl.dataset.selected = selectedContext.type === "dm" ? "1" : "0";
 			}
 
 			function renderFlowHeader() {
@@ -993,8 +985,7 @@
 				if (selectedContext.type === "agent") label = selectedContext.peerId;
 				else if (selectedContext.type === "topic")
 					label = `#${selectedContext.topicId}`;
-				else if (selectedContext.type === "dm") label = "DMs";
-				flowHeaderEl.textContent = `Message Flow · ${label}`;
+								flowHeaderEl.textContent = `Message Flow · ${label}`;
 			}
 
 			function renderPeers() {
@@ -1183,12 +1174,6 @@
 					)
 						return event.topicId === ctx.topicId;
 					return false;
-				}
-
-				if (ctx.type === "dm") {
-					// NOTE: topic fanout emits message_sent without topicId marker,
-					// so DM filter passes all message_* events (PRD-decided "flat" DMs).
-					return event.type.startsWith("message_");
 				}
 
 				return false;
@@ -1610,8 +1595,7 @@
 			treeAllEl.addEventListener("click", () =>
 				onTreeRowClick({ type: "all" }),
 			);
-			treeDmsEl.addEventListener("click", () => onTreeRowClick({ type: "dm" }));
-
+			
 			function applySnapshot(peers) {
 				sessions.clear();
 				for (const p of peers) sessions.set(p.peerId, p);
