@@ -412,6 +412,149 @@
 			#detail .card-list li[data-kind="history"][data-debug="1"] pre.debug {
 				display: block;
 			}
+			.issue-btn {
+				margin-left: auto;
+				padding: 4px 12px;
+				background: none;
+				border: 1px solid var(--border);
+				border-radius: 4px;
+				color: var(--muted);
+				font-size: 12px;
+				cursor: pointer;
+				font-family: inherit;
+			}
+			.issue-btn:hover {
+				color: var(--text);
+				border-color: var(--text);
+			}
+			#detail .card-list li[data-kind="history"] .issue-toggle {
+				display: none;
+				grid-column: 1 / -1;
+				justify-self: start;
+				margin: 6px 6px 0 0;
+				padding: 3px 10px;
+				background: none;
+				border: 1px solid var(--border);
+				border-radius: 3px;
+				color: var(--muted);
+				font-size: 11px;
+				cursor: pointer;
+				font-family: inherit;
+			}
+			#detail .card-list li[data-kind="history"][data-open="1"] .issue-toggle {
+				display: inline-block;
+			}
+			#detail .card-list li[data-kind="history"] .issue-toggle:hover {
+				color: var(--text);
+				border-color: var(--text);
+			}
+			#issue-modal {
+				border: 1px solid var(--border);
+				background: var(--bg);
+				color: var(--text);
+				border-radius: 6px;
+				padding: 0;
+				width: min(720px, 90vw);
+				max-height: 88vh;
+				font-family: inherit;
+			}
+			#issue-modal::backdrop {
+				background: rgba(0, 0, 0, 0.6);
+			}
+			#issue-modal form {
+				display: flex;
+				flex-direction: column;
+				gap: 10px;
+				padding: 18px 20px;
+				max-height: 88vh;
+				overflow: auto;
+			}
+			#issue-modal h2 {
+				margin: 0 0 6px;
+				font-size: 16px;
+			}
+			#issue-modal .type-row {
+				display: flex;
+				gap: 16px;
+				font-size: 12px;
+				color: var(--muted);
+			}
+			#issue-modal .type-row label {
+				cursor: pointer;
+			}
+			#issue-modal input[type="text"],
+			#issue-modal textarea {
+				background: rgba(255, 255, 255, 0.04);
+				border: 1px solid var(--border);
+				border-radius: 4px;
+				padding: 8px 10px;
+				color: var(--text);
+				font-family: inherit;
+				font-size: 13px;
+			}
+			#issue-modal textarea {
+				min-height: 180px;
+				font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+				font-size: 12px;
+				resize: vertical;
+			}
+			#issue-modal details {
+				border: 1px solid var(--border);
+				border-radius: 4px;
+				padding: 6px 10px;
+				font-size: 11px;
+				color: var(--muted);
+			}
+			#issue-modal details summary {
+				cursor: pointer;
+				outline: none;
+			}
+			#issue-modal pre.preview {
+				margin: 8px 0 0;
+				padding: 8px 10px;
+				background: rgba(255, 255, 255, 0.03);
+				border-radius: 4px;
+				white-space: pre-wrap;
+				word-break: break-all;
+				max-height: 240px;
+				overflow: auto;
+				font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+				font-size: 11px;
+			}
+			#issue-modal .actions {
+				display: flex;
+				justify-content: flex-end;
+				gap: 8px;
+				margin-top: 4px;
+			}
+			#issue-modal button {
+				padding: 6px 14px;
+				background: none;
+				border: 1px solid var(--border);
+				border-radius: 4px;
+				color: var(--text);
+				font-size: 12px;
+				cursor: pointer;
+				font-family: inherit;
+			}
+			#issue-modal button[type="submit"] {
+				border-color: var(--text);
+			}
+			#issue-modal button:disabled {
+				opacity: 0.5;
+				cursor: wait;
+			}
+			#issue-modal .status-line {
+				font-size: 11px;
+				color: var(--muted);
+				min-height: 14px;
+			}
+			#issue-modal .status-line[data-state="error"] {
+				color: #f88;
+			}
+			#issue-modal .status-line[data-state="ok"] {
+				color: #8f8;
+			}
 		</style>
 	</head>
 	<body>
@@ -420,6 +563,9 @@
 			<span id="status" class="status" data-state="connecting"
 				><span class="dot"></span><span id="status-text">connecting</span></span
 			>
+			<button type="button" id="header-issue-btn" class="issue-btn">
+				+ issue
+			</button>
 		</header>
 		<main>
 			<aside>
@@ -468,6 +614,46 @@
 				</div>
 			</section>
 		</main>
+		<dialog id="issue-modal">
+			<form id="issue-form" method="dialog">
+				<h2>Create GitHub issue</h2>
+				<div class="type-row">
+					<label
+						><input type="radio" name="issue-type" value="bug" checked />
+						bug</label
+					>
+					<label
+						><input type="radio" name="issue-type" value="feature" />
+						feature</label
+					>
+					<label
+						><input type="radio" name="issue-type" value="note" /> note</label
+					>
+				</div>
+				<input
+					type="text"
+					id="issue-title"
+					name="title"
+					placeholder="title"
+					required
+					maxlength="256"
+				/>
+				<textarea
+					id="issue-body"
+					name="body"
+					placeholder="## Summary&#10;&#10;## Reproduction"
+				></textarea>
+				<details id="issue-context-details">
+					<summary>🔧 Context (auto-collected)</summary>
+					<pre class="preview" id="issue-context-preview"></pre>
+				</details>
+				<div class="status-line" id="issue-status"></div>
+				<div class="actions">
+					<button type="button" id="issue-cancel">Cancel</button>
+					<button type="submit" id="issue-submit">Create</button>
+				</div>
+			</form>
+		</dialog>
 		<script type="module">
 			const FLOW_CAP = 500;
 			const FLOW_BUFFER_CAP = 500;
@@ -943,10 +1129,18 @@
 							e.stopPropagation();
 							li.dataset.debug = li.dataset.debug === "1" ? "0" : "1";
 						});
+						const issueBtn = document.createElement("button");
+						issueBtn.type = "button";
+						issueBtn.className = "issue-toggle";
+						issueBtn.textContent = "\ud83d\udcdd issue";
+						issueBtn.addEventListener("click", (e) => {
+							e.stopPropagation();
+							openIssueModal({ triggerMessage: m });
+						});
 						const debug = document.createElement("pre");
 						debug.className = "debug";
 						debug.textContent = JSON.stringify(m, null, 2);
-						li.append(time, from, subj, body, debugBtn, debug);
+						li.append(time, from, subj, body, debugBtn, issueBtn, debug);
 						li.addEventListener("click", (e) => {
 							if (e.target.closest(".debug-toggle")) return;
 							li.dataset.open = li.dataset.open === "1" ? "0" : "1";
@@ -1239,6 +1433,289 @@
 					}
 				});
 			}
+
+			const CLIENT_RING_CAP = 50;
+			const CONTEXT_TRUNCATE = 1024;
+			const clientRing = [];
+
+			function pushClientRing(entry) {
+				clientRing.push({ at: new Date().toISOString(), ...entry });
+				if (clientRing.length > CLIENT_RING_CAP) clientRing.shift();
+			}
+
+			function truncate(s) {
+				if (typeof s !== "string") return s;
+				return s.length > CONTEXT_TRUNCATE
+					? `${s.slice(0, CONTEXT_TRUNCATE)}…(truncated)`
+					: s;
+			}
+
+			(function wrapFetch() {
+				const originalFetch = window.fetch.bind(window);
+				window.fetch = async (input, init) => {
+					const url = typeof input === "string" ? input : input.url;
+					const method = (init?.method ?? "GET").toUpperCase();
+					const reqBody =
+						init?.body && typeof init.body === "string"
+							? truncate(init.body)
+							: undefined;
+					const start = performance.now();
+					try {
+						const res = await originalFetch(input, init);
+						pushClientRing({
+							kind: "fetch",
+							url,
+							method,
+							status: res.status,
+							durationMs: Math.round(performance.now() - start),
+							reqBody,
+						});
+						return res;
+					} catch (e) {
+						pushClientRing({
+							kind: "fetch",
+							url,
+							method,
+							status: 0,
+							durationMs: Math.round(performance.now() - start),
+							reqBody,
+							message: e?.message ?? String(e),
+						});
+						throw e;
+					}
+				};
+			})();
+
+			(function wrapEventSource() {
+				const OriginalES = window.EventSource;
+				if (!OriginalES) return;
+				window.EventSource = function PatchedES(url, opts) {
+					const es = new OriginalES(url, opts);
+					const origAdd = es.addEventListener.bind(es);
+					es.addEventListener = (type, listener, options) => {
+						const wrapped =
+							typeof listener === "function"
+								? (ev) => {
+										pushClientRing({
+											kind: "sse",
+											url: String(url),
+											event: type,
+											payload: truncate(ev?.data ?? ""),
+										});
+										return listener(ev);
+									}
+								: listener;
+						return origAdd(type, wrapped, options);
+					};
+					return es;
+				};
+				window.EventSource.prototype = OriginalES.prototype;
+			})();
+
+			window.addEventListener("error", (e) => {
+				pushClientRing({
+					kind: "error",
+					message: e.message ?? String(e.error),
+					stack: e.error?.stack ?? null,
+				});
+			});
+			window.addEventListener("unhandledrejection", (e) => {
+				pushClientRing({
+					kind: "error",
+					message:
+						e.reason?.message ?? (typeof e.reason === "string" ? e.reason : "unhandled rejection"),
+					stack: e.reason?.stack ?? null,
+				});
+			});
+
+			const issueModal = document.getElementById("issue-modal");
+			const issueForm = document.getElementById("issue-form");
+			const issueTitleEl = document.getElementById("issue-title");
+			const issueBodyEl = document.getElementById("issue-body");
+			const issueContextDetails = document.getElementById(
+				"issue-context-details",
+			);
+			const issueContextPreview = document.getElementById(
+				"issue-context-preview",
+			);
+			const issueStatusEl = document.getElementById("issue-status");
+			const issueSubmitBtn = document.getElementById("issue-submit");
+			const issueCancelBtn = document.getElementById("issue-cancel");
+			const headerIssueBtn = document.getElementById("header-issue-btn");
+
+			let issueTriggerMessage = null;
+			let issueServerDiag = null;
+
+			async function fetchDiagnostics() {
+				try {
+					const res = await fetch("/api/diagnostics", {
+						method: "POST",
+						headers: { "Content-Type": "application/json" },
+						body: "{}",
+					});
+					const json = await res.json();
+					if (json?.ok) return json;
+				} catch {
+					// 무시: context 섹션이 client 만 포함하게 fallback
+				}
+				return null;
+			}
+
+			function formatServerDiag(d) {
+				if (!d) return "(diagnostics unavailable)";
+				const lines = [
+					`- version: ${d.version}`,
+					`- uptime: ${d.uptimeSec}s`,
+					`- node: ${d.nodeVersion}`,
+					`- topicCount: ${d.topicCount}`,
+					`- peerCount: ${d.peerCount}`,
+					`- dbSizeByte: ${d.dbSizeByte}`,
+				];
+				return lines.join("\n");
+			}
+
+			function formatRecentList(list, mapFn) {
+				if (!list || list.length === 0) return "(none)";
+				return list.slice(-20).map(mapFn).join("\n");
+			}
+
+			function buildContextMarkdown() {
+				const server = issueServerDiag;
+				const parts = [];
+				parts.push("### Server");
+				parts.push(formatServerDiag(server));
+				parts.push("");
+				parts.push("### Recent RPC (server)");
+				parts.push(
+					formatRecentList(server?.recentRpcList, (r) => {
+						const err = r.error ? ` ERR=${r.error}` : "";
+						return `- ${r.at}  ${r.method}  ${r.durationMs}ms${err}`;
+					}),
+				);
+				parts.push("");
+				parts.push("### Recent errors (server)");
+				parts.push(
+					formatRecentList(
+						server?.recentErrorList,
+						(e) => `- ${e.at}  ${e.message}`,
+					),
+				);
+				parts.push("");
+				parts.push("### Recent client");
+				parts.push(
+					formatRecentList(clientRing, (r) => {
+						if (r.kind === "fetch") {
+							return `- ${r.at}  fetch ${r.method} ${r.url}  status=${r.status}  ${r.durationMs}ms`;
+						}
+						if (r.kind === "sse") {
+							return `- ${r.at}  sse event=${r.event}  payload=${truncate(r.payload ?? "")}`;
+						}
+						return `- ${r.at}  error  ${r.message}`;
+					}),
+				);
+				if (issueTriggerMessage) {
+					parts.push("");
+					parts.push("### Trigger message");
+					parts.push("```json");
+					parts.push(JSON.stringify(issueTriggerMessage, null, 2));
+					parts.push("```");
+				}
+				return parts.join("\n");
+			}
+
+			function selectedIssueType() {
+				const checked = issueForm.querySelector(
+					'input[name="issue-type"]:checked',
+				);
+				return checked ? checked.value : "bug";
+			}
+
+			function refreshIssuePreview() {
+				const type = selectedIssueType();
+				if (type === "note") {
+					issueContextDetails.hidden = true;
+					issueContextPreview.textContent = "";
+					return;
+				}
+				issueContextDetails.hidden = false;
+				issueContextPreview.textContent = buildContextMarkdown();
+			}
+
+			function composeIssueBody() {
+				const type = selectedIssueType();
+				const userBody =
+					issueBodyEl.value.trim() ||
+					"## Summary\n\n## Reproduction\n";
+				if (type === "note") return userBody;
+				return `${userBody}\n\n<details><summary>🔧 Context (auto-collected)</summary>\n\n${buildContextMarkdown()}\n\n</details>\n`;
+			}
+
+			async function openIssueModal(opts = {}) {
+				issueTriggerMessage = opts.triggerMessage ?? null;
+				issueTitleEl.value = "";
+				issueBodyEl.value = "## Summary\n\n## Reproduction\n";
+				issueStatusEl.textContent = "";
+				issueStatusEl.dataset.state = "";
+				const bugRadio = issueForm.querySelector(
+					'input[name="issue-type"][value="bug"]',
+				);
+				if (bugRadio) bugRadio.checked = true;
+				issueServerDiag = await fetchDiagnostics();
+				refreshIssuePreview();
+				issueModal.showModal();
+				issueTitleEl.focus();
+			}
+
+			issueForm
+				.querySelectorAll('input[name="issue-type"]')
+				.forEach((el) => {
+					el.addEventListener("change", refreshIssuePreview);
+				});
+			issueBodyEl.addEventListener("input", () => {
+				if (selectedIssueType() !== "note") refreshIssuePreview();
+			});
+
+			issueCancelBtn.addEventListener("click", () => {
+				issueModal.close();
+			});
+			headerIssueBtn.addEventListener("click", () => openIssueModal());
+
+			issueForm.addEventListener("submit", async (e) => {
+				e.preventDefault();
+				const title = issueTitleEl.value.trim();
+				if (!title) {
+					issueStatusEl.dataset.state = "error";
+					issueStatusEl.textContent = "title is required";
+					return;
+				}
+				const type = selectedIssueType();
+				const body = composeIssueBody();
+				issueSubmitBtn.disabled = true;
+				issueStatusEl.dataset.state = "";
+				issueStatusEl.textContent = "creating…";
+				try {
+					const res = await fetch("/api/issue_create", {
+						method: "POST",
+						headers: { "Content-Type": "application/json" },
+						body: JSON.stringify({ type, title, body }),
+					});
+					const json = await res.json();
+					if (!json?.ok) {
+						issueStatusEl.dataset.state = "error";
+						issueStatusEl.textContent =
+							json?.error?.message ?? `failed (status ${res.status})`;
+						return;
+					}
+					issueStatusEl.dataset.state = "ok";
+					issueStatusEl.textContent = `created #${json.issueNumber} → ${json.url}`;
+					setTimeout(() => issueModal.close(), 1500);
+				} catch (err) {
+					issueStatusEl.dataset.state = "error";
+					issueStatusEl.textContent = err?.message ?? String(err);
+				} finally {
+					issueSubmitBtn.disabled = false;
+				}
+			});
 
 			renderFlowHeader();
 			loadInitialTopics();

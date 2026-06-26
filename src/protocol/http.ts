@@ -87,6 +87,8 @@ export const HTTP_ENDPOINTS = {
 	topicUnsubscribe: { method: "POST", path: "/api/topic_unsubscribe" },
 	topicHistory: { method: "POST", path: "/api/topic_history" },
 	topicDetail: { method: "POST", path: "/api/topic_detail" },
+	diagnostics: { method: "POST", path: "/api/diagnostics" },
+	issueCreate: { method: "POST", path: "/api/issue_create" },
 } as const;
 
 export interface RegisterRequest {
@@ -197,6 +199,43 @@ export interface TopicDetailResponse {
 	topic: TopicDetailDto;
 }
 
+export interface RecentRpcEntry {
+	method: string;
+	durationMs: number;
+	error: string | null;
+	at: IsoTimestamp;
+}
+
+export interface RecentErrorEntry {
+	message: string;
+	stack: string | null;
+	at: IsoTimestamp;
+}
+
+export type DiagnosticsRequest = Record<string, never>;
+export interface DiagnosticsResponse {
+	version: string;
+	uptimeSec: number;
+	nodeVersion: string;
+	topicCount: number;
+	peerCount: number;
+	dbSizeByte: number;
+	recentRpcList: RecentRpcEntry[];
+	recentErrorList: RecentErrorEntry[];
+}
+
+export type IssueType = "bug" | "feature" | "note";
+
+export interface IssueCreateRequest {
+	type: IssueType;
+	title: string;
+	body: string;
+}
+export interface IssueCreateResponse {
+	issueNumber: number;
+	url: string;
+}
+
 export type RegisterApiResponse = ApiResponse<RegisterResponse>;
 export type UnregisterApiResponse = ApiResponse<UnregisterResponse>;
 export type SendApiResponse = ApiResponse<SendResponse>;
@@ -210,3 +249,5 @@ export type TopicSendApiResponse = ApiResponse<TopicSendResponse>;
 export type TopicUnsubscribeApiResponse = ApiResponse<TopicUnsubscribeResponse>;
 export type TopicHistoryApiResponse = ApiResponse<TopicHistoryResponse>;
 export type TopicDetailApiResponse = ApiResponse<TopicDetailResponse>;
+export type DiagnosticsApiResponse = ApiResponse<DiagnosticsResponse>;
+export type IssueCreateApiResponse = ApiResponse<IssueCreateResponse>;

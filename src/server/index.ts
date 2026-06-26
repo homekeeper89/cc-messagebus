@@ -1,4 +1,4 @@
-import { readFileSync } from "node:fs";
+import { readFileSync, statSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import Fastify, { type FastifyError, type FastifyInstance } from "fastify";
@@ -6,6 +6,7 @@ import { type ErrorCode, errorCodeToHttpStatus } from "../protocol/errors.js";
 import {
 	type AckRequest,
 	HTTP_ENDPOINTS,
+	type IssueCreateRequest,
 	type ReadRequest,
 	type RegisterRequest,
 	type SendRequest,
@@ -30,7 +31,9 @@ import {
 	HISTORY_LIMIT_MAX,
 } from "./broker.js";
 import { type CleanupHandle, startCleanup } from "./cleanup.js";
+import { loadConfig, type ServerConfig } from "./config.js";
 import { type CcDatabase, openDatabase } from "./db.js";
+import { createGhCliIssueClient, type IssueClient } from "./issue.js";
 
 const DEFAULT_HOST = "127.0.0.1";
 const DEFAULT_PORT = 5959;
@@ -44,6 +47,11 @@ const DASHBOARD_HTML = readFileSync(
 	join(__dirname, "../dashboard/index.html"),
 	"utf8",
 );
+const PACKAGE_VERSION = (
+	JSON.parse(readFileSync(join(__dirname, "../../package.json"), "utf8")) as {
+		version: string;
+	}
+).version;
 
 const PEER_ID_SCHEMA = { type: "string", minLength: 1, maxLength: 64 };
 const SUBJECT_SCHEMA = { type: "string", minLength: 1, maxLength: 256 };
@@ -162,6 +170,21 @@ const TOPIC_DETAIL_BODY = {
 	required: ["topicId"],
 	additionalProperties: false,
 };
+const DIAGNOSTICS_BODY = {
+	type: "object",
+	properties: {},
+	additionalProperties: false,
+};
+const ISSUE_CREATE_BODY = {
+	type: "object",
+	properties: {
+		type: { type: "string", enum: ["bug", "feature", "note"] },
+		title: { type: "string", minLength: 1, maxLength: 256 },
+		body: { type: "string", maxLength: 65536 },
+	},
+	required: ["type", "title", "body"],
+	additionalProperties: false,
+};
 
 export interface ServerOptions {
 	host?: string;
@@ -172,6 +195,10 @@ export interface ServerOptions {
 	cleanupIntervalSec?: number;
 	dashboardUrl?: string;
 	logger?: boolean;
+	// 테스트 / 임베드 환경에서 직접 주입 시 사용. production 은 loadConfig() 자동 호출.
+	config?: ServerConfig;
+	// 테스트에서 gh CLI mock 주입용. production 은 config.issueRepo 로 자동 생성.
+	issueClient?: IssueClient | null;
 }
 
 export interface Server {
@@ -193,10 +220,27 @@ export function createServer(opts: ServerOptions): Server {
 	const dashboardUrl = opts.dashboardUrl ?? `http://${host}:${port}`;
 
 	const db = openDatabase(opts.dbPath);
+	const config = opts.config ?? loadConfig();
+	const issueClient: IssueClient | null =
+		opts.issueClient !== undefined
+			? opts.issueClient
+			: config.issueRepo
+				? createGhCliIssueClient({ repo: config.issueRepo })
+				: null;
+	const getDbSizeByte = (): number => {
+		try {
+			return statSync(opts.dbPath).size;
+		} catch {
+			return 0;
+		}
+	};
 	const broker = createBroker(db, {
 		visibilityTimeoutSec,
 		ttlDays,
 		dashboardUrl,
+		version: PACKAGE_VERSION,
+		getDbSizeByte,
+		issueClient,
 	});
 	let cleanup: CleanupHandle | null = null;
 
@@ -285,6 +329,18 @@ export function createServer(opts: ServerOptions): Server {
 		HTTP_ENDPOINTS.topicDetail.path,
 		{ schema: { body: TOPIC_DETAIL_BODY } },
 		async (req) => ({ ok: true, ...broker.topicDetail(req.body) }),
+	);
+
+	app.post(
+		HTTP_ENDPOINTS.diagnostics.path,
+		{ schema: { body: DIAGNOSTICS_BODY } },
+		async () => ({ ok: true, ...broker.diagnostics() }),
+	);
+
+	app.post<{ Body: IssueCreateRequest }>(
+		HTTP_ENDPOINTS.issueCreate.path,
+		{ schema: { body: ISSUE_CREATE_BODY } },
+		async (req) => ({ ok: true, ...(await broker.issueCreate(req.body)) }),
 	);
 
 	app.get<{ Params: { peerId: string } }>(
