@@ -4,6 +4,10 @@ import type { ErrorCode } from "../protocol/errors.js";
 import type {
 	AckRequest,
 	AckResponse,
+	ChannelBroadcastRequest,
+	ChannelBroadcastResponse,
+	ChannelDeleteRequest,
+	ChannelDeleteResponse,
 	DiagnosticsResponse,
 	IssueCreateRequest,
 	IssueCreateResponse,
@@ -11,6 +15,8 @@ import type {
 	ListTopicsResponse,
 	MessageDto,
 	MessageId,
+	PeerDeleteRequest,
+	PeerDeleteResponse,
 	PeerId,
 	ReadRequest,
 	ReadResponse,
@@ -84,6 +90,9 @@ export interface Broker {
 	topicDetail: (req: TopicDetailRequest) => TopicDetailResponse;
 	diagnostics: () => DiagnosticsResponse;
 	issueCreate: (req: IssueCreateRequest) => Promise<IssueCreateResponse>;
+	channelBroadcast: (req: ChannelBroadcastRequest) => ChannelBroadcastResponse;
+	channelDelete: (req: ChannelDeleteRequest) => ChannelDeleteResponse;
+	peerDelete: (req: PeerDeleteRequest) => PeerDeleteResponse;
 }
 
 const HISTORY_LIMIT_DEFAULT = 50;
@@ -613,6 +622,132 @@ export function createBroker(db: CcDatabase, opts: BrokerOptions): Broker {
 		}
 	}
 
+	// 운영자 broadcast: operator 처럼 사용자가 입력한 from identity 로 topic 에 발행.
+	// 일반 send/topicSend 와 달리 sender existence 를 강제하지 않는다 — operator 가
+	// register 안 된 가상 identity 여도 dashboard 에서 발행 가능해야 하기 때문.
+	function channelBroadcast(
+		req: ChannelBroadcastRequest,
+	): ChannelBroadcastResponse {
+		const allSubs = db.listTopicSubscribers(req.topicId);
+		const deliverTo = allSubs.filter((s) => s !== req.from);
+		const now = nowIso();
+		const expiresAt = plusDays(now, opts.ttlDays);
+		const topicMessageId = randomUUID() as TopicMessageId;
+		const deliveryMessageIds: MessageId[] = deliverTo.map(
+			() => randomUUID() as MessageId,
+		);
+		let result: { deliveredTo: PeerId[] };
+		try {
+			result = db.topicSend({
+				topicMessageId,
+				topicId: req.topicId,
+				from: req.from,
+				subject: req.subject,
+				body: req.body,
+				sentAt: now,
+				expiresAt,
+				deliveryMessageIds,
+			});
+		} catch (e) {
+			if (e instanceof DbError && e.code === "TOPIC_NOT_FOUND") {
+				throw new BrokerError(
+					"TOPIC_NOT_FOUND",
+					`topic '${req.topicId}' not found`,
+				);
+			}
+			throw e;
+		}
+		result.deliveredTo.forEach((subscriberId, i) => {
+			const fanoutMessage: MessageDto = {
+				id: deliveryMessageIds[i] as MessageId,
+				from: req.from,
+				to: subscriberId,
+				subject: req.subject,
+				body: req.body,
+				threadId: null,
+				sentAt: now,
+				inFlightUntil: null,
+				ackedAt: null,
+				expiresAt,
+			};
+			emit({
+				type: "message_sent",
+				message: fanoutMessage,
+				kind: "topic",
+				topicId: req.topicId,
+			});
+		});
+		emit({
+			type: "topic_message_published",
+			topicId: req.topicId,
+			topicMessageId,
+			from: req.from,
+			deliveredTo: result.deliveredTo,
+			sentAt: now,
+		});
+		return {
+			topicMessageId,
+			deliveredTo: result.deliveredTo,
+			sentAt: now,
+		};
+	}
+
+	function channelDelete(req: ChannelDeleteRequest): ChannelDeleteResponse {
+		if (req.confirm !== req.topicId) {
+			throw new BrokerError(
+				"VALIDATION_FAILED",
+				"confirm string must exactly match topicId",
+			);
+		}
+		let stats: { deletedMessages: number; deletedSubs: number };
+		try {
+			stats = db.deleteTopic(req.topicId);
+		} catch (e) {
+			if (e instanceof DbError && e.code === "TOPIC_NOT_FOUND") {
+				throw new BrokerError(
+					"TOPIC_NOT_FOUND",
+					`topic '${req.topicId}' not found`,
+				);
+			}
+			throw e;
+		}
+		const now = nowIso();
+		emit({
+			type: "topic_deleted",
+			topicId: req.topicId,
+			deletedMessages: stats.deletedMessages,
+			deletedSubs: stats.deletedSubs,
+			at: now,
+		});
+		return stats;
+	}
+
+	function peerDelete(req: PeerDeleteRequest): PeerDeleteResponse {
+		if (req.confirm !== req.peerId) {
+			throw new BrokerError(
+				"VALIDATION_FAILED",
+				"confirm string must exactly match peerId",
+			);
+		}
+		const existing = db.getSession(req.peerId);
+		if (!existing) {
+			throw new BrokerError(
+				"PEER_NOT_FOUND",
+				`peer '${req.peerId}' is not registered`,
+			);
+		}
+		const stats = db.deletePeer(req.peerId);
+		const now = nowIso();
+		emit({
+			type: "peer_deleted",
+			peerId: req.peerId,
+			deletedSubs: stats.deletedSubs,
+			cancelledInflight: stats.cancelledInflight,
+			at: now,
+		});
+		return stats;
+	}
+
 	return {
 		events,
 		register: instrument("register", register),
@@ -633,5 +768,8 @@ export function createBroker(db: CcDatabase, opts: BrokerOptions): Broker {
 		// diagnostics 자체는 ring 기록 제외 — snapshot 호출이 자기 자신을 오염시키는 노이즈 방지.
 		diagnostics,
 		issueCreate: instrumentAsync("issueCreate", issueCreate),
+		channelBroadcast: instrument("channelBroadcast", channelBroadcast),
+		channelDelete: instrument("channelDelete", channelDelete),
+		peerDelete: instrument("peerDelete", peerDelete),
 	};
 }

@@ -33,6 +33,8 @@ export const DASHBOARD_EVENT_TYPES = {
 	topicSubscribed: "topic_subscribed",
 	topicUnsubscribed: "topic_unsubscribed",
 	topicMessagePublished: "topic_message_published",
+	topicDeleted: "topic_deleted",
+	peerDeleted: "peer_deleted",
 } as const;
 
 export interface SessionSnapshotEvent {
@@ -107,6 +109,20 @@ export interface TopicMessagePublishedEvent {
 	deliveredTo: PeerId[];
 	sentAt: IsoTimestamp;
 }
+export interface TopicDeletedEvent {
+	type: "topic_deleted";
+	topicId: TopicId;
+	deletedMessages: number;
+	deletedSubs: number;
+	at: IsoTimestamp;
+}
+export interface PeerDeletedEvent {
+	type: "peer_deleted";
+	peerId: PeerId;
+	deletedSubs: number;
+	cancelledInflight: number;
+	at: IsoTimestamp;
+}
 
 export type DashboardEvent =
 	| SessionSnapshotEvent
@@ -120,7 +136,9 @@ export type DashboardEvent =
 	| TopicCreatedEvent
 	| TopicSubscribedEvent
 	| TopicUnsubscribedEvent
-	| TopicMessagePublishedEvent;
+	| TopicMessagePublishedEvent
+	| TopicDeletedEvent
+	| PeerDeletedEvent;
 
 export function serializeSseEvent<T extends { type: string }>(
 	event: T,

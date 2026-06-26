@@ -70,7 +70,7 @@ CREATE TABLE IF NOT EXISTS messages (
 	in_flight_until TEXT,
 	acked_at TEXT,
 	expires_at TEXT NOT NULL,
-	topic_message_id TEXT REFERENCES topic_messages(id) ON DELETE SET NULL
+	topic_message_id TEXT REFERENCES topic_messages(id) ON DELETE CASCADE
 );
 
 CREATE INDEX IF NOT EXISTS idx_messages_delivery
@@ -104,6 +104,30 @@ DROP INDEX IF EXISTS idx_messages_delivery;
 CREATE INDEX IF NOT EXISTS idx_topic_messages_topic_sent ON topic_messages (topic_id, sent_at);
 CREATE INDEX IF NOT EXISTS idx_topic_subscriptions_subscriber ON topic_subscriptions (subscriber_peer_id);
 CREATE INDEX IF NOT EXISTS idx_messages_delivery ON messages (to_peer, acked_at, in_flight_until);
+`;
+
+// SQLite cannot ALTER an existing FK clause. v3 rebuilds messages so that
+// topic_message_id cascades on topic_messages delete (was SET NULL in v2).
+const MIGRATE_V2_TO_V3_SQL = `
+CREATE TABLE messages_new (
+	id TEXT PRIMARY KEY,
+	from_peer TEXT NOT NULL,
+	to_peer TEXT NOT NULL,
+	subject TEXT NOT NULL,
+	body TEXT NOT NULL,
+	thread_id TEXT,
+	sent_at TEXT NOT NULL,
+	in_flight_until TEXT,
+	acked_at TEXT,
+	expires_at TEXT NOT NULL,
+	topic_message_id TEXT REFERENCES topic_messages(id) ON DELETE CASCADE
+);
+INSERT INTO messages_new (id, from_peer, to_peer, subject, body, thread_id, sent_at, in_flight_until, acked_at, expires_at, topic_message_id)
+	SELECT id, from_peer, to_peer, subject, body, thread_id, sent_at, in_flight_until, acked_at, expires_at, topic_message_id FROM messages;
+DROP TABLE messages;
+ALTER TABLE messages_new RENAME TO messages;
+CREATE INDEX idx_messages_delivery ON messages (to_peer, acked_at, in_flight_until);
+CREATE INDEX idx_messages_expires ON messages (expires_at);
 `;
 
 interface SessionRow {
@@ -213,11 +237,31 @@ function migrateV1ToV2(db: Database.Database): void {
 	}
 }
 
+function migrateV2ToV3(db: Database.Database): void {
+	db.pragma("foreign_keys = OFF");
+	try {
+		const tx = db.transaction(() => {
+			db.exec(MIGRATE_V2_TO_V3_SQL);
+			db.pragma("user_version = 3");
+		});
+		tx();
+	} finally {
+		db.pragma("foreign_keys = ON");
+	}
+}
+
 export function openDatabase(dbPath: string) {
 	mkdirSync(dirname(dbPath), { recursive: true });
 	const db = new Database(dbPath);
 	db.pragma("journal_mode = WAL");
 	db.pragma("foreign_keys = ON");
+
+	const isFreshDb =
+		db
+			.prepare<[], { name: string } | undefined>(
+				"SELECT name FROM sqlite_master WHERE type='table' AND name='sessions'",
+			)
+			.get() === undefined;
 
 	if (detectV1(db)) {
 		migrateV1ToV2(db);
@@ -225,9 +269,18 @@ export function openDatabase(dbPath: string) {
 
 	db.exec(SCHEMA_DDL);
 
-	const userVersion = db.pragma("user_version", { simple: true }) as number;
+	if (isFreshDb) {
+		db.pragma("user_version = 3");
+	}
+
+	let userVersion = db.pragma("user_version", { simple: true }) as number;
 	if (userVersion < 2) {
 		db.pragma("user_version = 2");
+		userVersion = 2;
+	}
+	if (userVersion === 2) {
+		migrateV2ToV3(db);
+		userVersion = 3;
 	}
 
 	const stmtGetSession = db.prepare<[string], SessionRow>(
@@ -405,6 +458,25 @@ export function openDatabase(dbPath: string) {
 		]
 	>(
 		"INSERT INTO messages (id, from_peer, to_peer, subject, body, thread_id, sent_at, expires_at, topic_message_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+	);
+	const stmtDeleteTopic = db.prepare<[string]>(
+		"DELETE FROM topics WHERE id = ?",
+	);
+	const stmtCountTopicSubs = db.prepare<[string], { c: number }>(
+		"SELECT COUNT(*) AS c FROM topic_subscriptions WHERE topic_id = ?",
+	);
+	// topic 삭제 전에 cascade 될 fanout messages 수를 미리 계산.
+	const stmtCountTopicFanoutMessages = db.prepare<[string], { c: number }>(
+		"SELECT COUNT(*) AS c FROM messages WHERE topic_message_id IN (SELECT id FROM topic_messages WHERE topic_id = ?)",
+	);
+	const stmtDeleteSubsForPeer = db.prepare<[string]>(
+		"DELETE FROM topic_subscriptions WHERE subscriber_peer_id = ?",
+	);
+	const stmtCountPeerInflightInbox = db.prepare<[string], { c: number }>(
+		"SELECT COUNT(*) AS c FROM messages WHERE to_peer = ? AND acked_at IS NULL AND in_flight_until IS NOT NULL",
+	);
+	const stmtDeletePeerInbox = db.prepare<[string]>(
+		"DELETE FROM messages WHERE to_peer = ?",
 	);
 
 	function registerSession(peerId: PeerId, now: IsoTimestamp): PeerDto {
@@ -644,6 +716,29 @@ export function openDatabase(dbPath: string) {
 		},
 	);
 
+	const deleteTopicTx = db.transaction(
+		(topicId: TopicId): { deletedMessages: number; deletedSubs: number } => {
+			const topic = stmtGetTopic.get(topicId);
+			if (!topic) throw new DbError("TOPIC_NOT_FOUND");
+			const deletedSubs = stmtCountTopicSubs.get(topicId)?.c ?? 0;
+			const deletedMessages = stmtCountTopicFanoutMessages.get(topicId)?.c ?? 0;
+			stmtDeleteTopic.run(topicId);
+			return { deletedMessages, deletedSubs };
+		},
+	);
+
+	// peer 삭제 정책: subscriptions 제거, inbox 전체 삭제 (peer 가 사라지면
+	// 누구도 read 할 수 없으므로 보관해도 expiration 까지 누수). session 행 자체도 제거.
+	const deletePeerTx = db.transaction(
+		(peerId: PeerId): { deletedSubs: number; cancelledInflight: number } => {
+			const subsResult = stmtDeleteSubsForPeer.run(peerId);
+			const cancelledInflight = stmtCountPeerInflightInbox.get(peerId)?.c ?? 0;
+			stmtDeletePeerInbox.run(peerId);
+			stmtDeleteSession.run(peerId);
+			return { deletedSubs: subsResult.changes, cancelledInflight };
+		},
+	);
+
 	return {
 		registerSession,
 		unregisterSession: (peerId: PeerId, purge: boolean) =>
@@ -673,6 +768,8 @@ export function openDatabase(dbPath: string) {
 		listTopicSubscribers,
 		listTopicSummaries,
 		topicSend: (input: TopicSendInput) => topicSendTx(input),
+		deleteTopic: (topicId: TopicId) => deleteTopicTx(topicId),
+		deletePeer: (peerId: PeerId) => deletePeerTx(peerId),
 		close: (): void => {
 			db.close();
 		},
