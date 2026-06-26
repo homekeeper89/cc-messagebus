@@ -17,6 +17,8 @@ import {
 	type TopicDetailResponse,
 	type TopicHistoryRequest,
 	type TopicHistoryResponse,
+	type TopicMonitorRequest,
+	type TopicMonitorResponse,
 	type TopicSendRequest,
 	type TopicSendResponse,
 	type TopicSubscribeRequest,
@@ -56,6 +58,7 @@ export interface BrokerClient {
 	) => Promise<TopicUnsubscribeResponse>;
 	topicHistory: (req: TopicHistoryRequest) => Promise<TopicHistoryResponse>;
 	topicDetail: (req: TopicDetailRequest) => Promise<TopicDetailResponse>;
+	topicMonitor: (req: TopicMonitorRequest) => Promise<TopicMonitorResponse>;
 }
 
 export function createBrokerClient(baseUrl: string): BrokerClient {
@@ -149,6 +152,11 @@ export function createBrokerClient(baseUrl: string): BrokerClient {
 		topicDetail: (req) =>
 			call<TopicDetailRequest, TopicDetailResponse>(
 				HTTP_ENDPOINTS.topicDetail.path,
+				req,
+			),
+		topicMonitor: (req) =>
+			call<TopicMonitorRequest, TopicMonitorResponse>(
+				HTTP_ENDPOINTS.topicMonitor.path,
 				req,
 			),
 	};

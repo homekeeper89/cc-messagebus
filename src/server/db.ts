@@ -420,6 +420,39 @@ export function openDatabase(dbPath: string) {
 		[string],
 		{ subscriber_peer_id: string }
 	>("SELECT subscriber_peer_id FROM topic_subscriptions WHERE topic_id = ?");
+	const stmtGetSubscription = db.prepare<
+		[string, string],
+		{ last_seen_message_id: string | null }
+	>(
+		"SELECT last_seen_message_id FROM topic_subscriptions WHERE topic_id = ? AND subscriber_peer_id = ?",
+	);
+	const stmtUpdateSubscriptionCursor = db.prepare<[string, string, string]>(
+		"UPDATE topic_subscriptions SET last_seen_message_id = ? WHERE topic_id = ? AND subscriber_peer_id = ?",
+	);
+	const stmtListTopicMessagesFromStart = db.prepare<
+		[string, number],
+		TopicMessageRow
+	>(
+		`SELECT id, topic_id, from_peer_id, subject, body, sent_at
+		 FROM topic_messages
+		 WHERE topic_id = ?
+		 ORDER BY sent_at ASC, id ASC
+		 LIMIT ?`,
+	);
+	const stmtListTopicMessagesAfterCursor = db.prepare<
+		[string, string, string, string, number],
+		TopicMessageRow
+	>(
+		`SELECT id, topic_id, from_peer_id, subject, body, sent_at
+		 FROM topic_messages
+		 WHERE topic_id = ?
+		   AND (
+		     sent_at > (SELECT sent_at FROM topic_messages WHERE id = ?)
+		     OR (sent_at = (SELECT sent_at FROM topic_messages WHERE id = ?) AND id > ?)
+		   )
+		 ORDER BY sent_at ASC, id ASC
+		 LIMIT ?`,
+	);
 	const stmtListTopicSummaries = db.prepare<
 		[],
 		{
@@ -738,6 +771,37 @@ export function openDatabase(dbPath: string) {
 		},
 	);
 
+	const monitorTopicTx = db.transaction(
+		(
+			topicId: TopicId,
+			peerId: PeerId,
+			max: number,
+		): { messages: TopicMessageRow[]; cursor: string | null } => {
+			const topic = stmtGetTopic.get(topicId);
+			if (!topic) throw new DbError("TOPIC_NOT_FOUND");
+			const sub = stmtGetSubscription.get(topicId, peerId);
+			if (!sub) throw new DbError("NOT_SUBSCRIBED");
+
+			const cursor = sub.last_seen_message_id;
+			const rows =
+				cursor === null
+					? stmtListTopicMessagesFromStart.all(topicId, max)
+					: stmtListTopicMessagesAfterCursor.all(
+							topicId,
+							cursor,
+							cursor,
+							cursor,
+							max,
+						);
+
+			if (rows.length === 0) return { messages: [], cursor };
+
+			const newCursor = rows[rows.length - 1]?.id ?? cursor;
+			stmtUpdateSubscriptionCursor.run(newCursor, topicId, peerId);
+			return { messages: rows, cursor: newCursor };
+		},
+	);
+
 	const deleteTopicTx = db.transaction(
 		(topicId: TopicId): { deletedMessages: number; deletedSubs: number } => {
 			const topic = stmtGetTopic.get(topicId);
@@ -790,6 +854,8 @@ export function openDatabase(dbPath: string) {
 		listTopicSubscribers,
 		listTopicSummaries,
 		topicSend: (input: TopicSendInput) => topicSendTx(input),
+		monitorTopic: (topicId: TopicId, peerId: PeerId, max: number) =>
+			monitorTopicTx(topicId, peerId, max),
 		deleteTopic: (topicId: TopicId) => deleteTopicTx(topicId),
 		deletePeer: (peerId: PeerId) => deletePeerTx(peerId),
 		close: (): void => {

@@ -35,6 +35,8 @@ import type {
 	TopicHistoryResponse,
 	TopicMessageDto,
 	TopicMessageId,
+	TopicMonitorRequest,
+	TopicMonitorResponse,
 	TopicSendRequest,
 	TopicSendResponse,
 	TopicSubscribeRequest,
@@ -88,6 +90,7 @@ export interface Broker {
 	topicUnsubscribe: (req: TopicUnsubscribeRequest) => TopicUnsubscribeResponse;
 	topicHistory: (req: TopicHistoryRequest) => TopicHistoryResponse;
 	topicDetail: (req: TopicDetailRequest) => TopicDetailResponse;
+	topicMonitor: (req: TopicMonitorRequest) => TopicMonitorResponse;
 	diagnostics: () => DiagnosticsResponse;
 	issueCreate: (req: IssueCreateRequest) => Promise<IssueCreateResponse>;
 	channelBroadcast: (req: ChannelBroadcastRequest) => ChannelBroadcastResponse;
@@ -589,6 +592,44 @@ export function createBroker(db: CcDatabase, opts: BrokerOptions): Broker {
 		return { topic: detail };
 	}
 
+	function topicMonitor(req: TopicMonitorRequest): TopicMonitorResponse {
+		const requestedMax = req.max ?? HISTORY_LIMIT_DEFAULT;
+		if (requestedMax < 1 || requestedMax > HISTORY_LIMIT_MAX) {
+			throw new BrokerError(
+				"VALIDATION_FAILED",
+				`max must be between 1 and ${HISTORY_LIMIT_MAX}`,
+			);
+		}
+		let result: ReturnType<typeof db.monitorTopic>;
+		try {
+			result = db.monitorTopic(req.topicId, req.peerId, requestedMax);
+		} catch (e) {
+			if (e instanceof DbError && e.code === "TOPIC_NOT_FOUND") {
+				throw new BrokerError(
+					"TOPIC_NOT_FOUND",
+					`topic '${req.topicId}' not found`,
+				);
+			}
+			if (e instanceof DbError && e.code === "NOT_SUBSCRIBED") {
+				throw new BrokerError(
+					"NOT_SUBSCRIBED",
+					`peer '${req.peerId}' is not subscribed to '${req.topicId}'`,
+				);
+			}
+			throw e;
+		}
+		const messages: TopicMessageDto[] = result.messages.map((row) => ({
+			topicMessageId: row.id as TopicMessageId,
+			topicId: row.topic_id,
+			from: row.from_peer_id,
+			subject: row.subject,
+			body: row.body,
+			sentAt: row.sent_at,
+			expiresAt: plusDays(row.sent_at, opts.ttlDays),
+		}));
+		return { messages, cursor: result.cursor };
+	}
+
 	function diagnostics(): DiagnosticsResponse {
 		return {
 			version: opts.version,
@@ -765,6 +806,7 @@ export function createBroker(db: CcDatabase, opts: BrokerOptions): Broker {
 		topicUnsubscribe: instrument("topicUnsubscribe", topicUnsubscribe),
 		topicHistory: instrument("topicHistory", topicHistory),
 		topicDetail: instrument("topicDetail", topicDetail),
+		topicMonitor: instrument("topicMonitor", topicMonitor),
 		// diagnostics 자체는 ring 기록 제외 — snapshot 호출이 자기 자신을 오염시키는 노이즈 방지.
 		diagnostics,
 		issueCreate: instrumentAsync("issueCreate", issueCreate),

@@ -142,7 +142,7 @@ const noopSpawn: SpawnCmd = { exe: "/bin/true", args: [] };
 describe("mcp/server.buildToolList", () => {
 	it("returns all tools matching protocol/mcp.ts", () => {
 		const tools = buildToolList();
-		assert.equal(tools.length, 12);
+		assert.equal(tools.length, 13);
 		const keys = Object.keys(MCP_TOOL_NAMES) as McpToolKey[];
 		for (const key of keys) {
 			const found = tools.find((t) => t.name === MCP_TOOL_NAMES[key]);
