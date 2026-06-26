@@ -245,7 +245,7 @@ describe("migration v1 → v2", () => {
 		assert.equal(dm?.topic_message_id, "cm-1");
 
 		const userVersion = raw.pragma("user_version", { simple: true });
-		assert.equal(userVersion, 3);
+		assert.equal(userVersion, 4);
 
 		raw.close();
 	});
@@ -264,7 +264,7 @@ describe("migration v1 → v2", () => {
 
 		const raw = new Database(dbPath, { readonly: true });
 		const userVersion = raw.pragma("user_version", { simple: true });
-		assert.equal(userVersion, 3);
+		assert.equal(userVersion, 4);
 		raw.close();
 	});
 });
@@ -384,7 +384,7 @@ describe("migration v2 → v3 (messages.topic_message_id CASCADE)", () => {
 		db.close();
 
 		const raw = new Database(dbPath, { readonly: true });
-		assert.equal(raw.pragma("user_version", { simple: true }), 3);
+		assert.equal(raw.pragma("user_version", { simple: true }), 4);
 
 		const msg = raw
 			.prepare<[], { id: string; topic_message_id: string | null }>(
@@ -427,6 +427,167 @@ describe("migration v2 → v3 (messages.topic_message_id CASCADE)", () => {
 			fanoutCount?.c,
 			0,
 			"fanout messages must cascade-delete via topic_message_id FK (v3 schema)",
+		);
+		raw.close();
+	});
+});
+
+describe("migration v3 → v4 (topic_subscriptions.last_seen_message_id)", () => {
+	let tmpDir: string;
+	let dbPath: string;
+
+	before(() => {
+		tmpDir = mkdtempSync(join(tmpdir(), "ccmb-migrate-v4-"));
+	});
+
+	after(() => {
+		rmSync(tmpDir, { recursive: true, force: true });
+	});
+
+	beforeEach(() => {
+		dbPath = join(tmpDir, `data-${Date.now()}-${Math.random()}.db`);
+	});
+
+	function seedV3Database(path: string): void {
+		const raw = new Database(path);
+		raw.pragma("foreign_keys = ON");
+		raw.exec(`
+			CREATE TABLE sessions (
+				peer_id TEXT PRIMARY KEY,
+				connected_at TEXT NOT NULL,
+				last_seen_at TEXT NOT NULL,
+				status TEXT NOT NULL,
+				last_activity_at TEXT
+			);
+			CREATE TABLE topics (
+				id TEXT PRIMARY KEY,
+				created_at TEXT NOT NULL,
+				created_by TEXT NOT NULL
+			);
+			CREATE TABLE topic_subscriptions (
+				topic_id TEXT NOT NULL REFERENCES topics(id) ON DELETE CASCADE,
+				subscriber_peer_id TEXT NOT NULL,
+				subscribed_at TEXT NOT NULL,
+				PRIMARY KEY (topic_id, subscriber_peer_id)
+			);
+			CREATE TABLE topic_messages (
+				id TEXT PRIMARY KEY,
+				topic_id TEXT NOT NULL REFERENCES topics(id) ON DELETE CASCADE,
+				from_peer_id TEXT NOT NULL,
+				subject TEXT NOT NULL,
+				body TEXT NOT NULL,
+				sent_at TEXT NOT NULL
+			);
+			CREATE TABLE messages (
+				id TEXT PRIMARY KEY,
+				from_peer TEXT NOT NULL,
+				to_peer TEXT NOT NULL,
+				subject TEXT NOT NULL,
+				body TEXT NOT NULL,
+				thread_id TEXT,
+				sent_at TEXT NOT NULL,
+				in_flight_until TEXT,
+				acked_at TEXT,
+				expires_at TEXT NOT NULL,
+				topic_message_id TEXT REFERENCES topic_messages(id) ON DELETE CASCADE
+			);
+		`);
+		raw.pragma("user_version = 3");
+
+		raw
+			.prepare(
+				"INSERT INTO topics (id, created_at, created_by) VALUES (?, ?, ?)",
+			)
+			.run("#general", "2026-06-19T00:00:00.000Z", "alice");
+		raw
+			.prepare(
+				"INSERT INTO topic_subscriptions (topic_id, subscriber_peer_id, subscribed_at) VALUES (?, ?, ?)",
+			)
+			.run("#general", "alice", "2026-06-19T00:00:01.000Z");
+		raw
+			.prepare(
+				"INSERT INTO topic_messages (id, topic_id, from_peer_id, subject, body, sent_at) VALUES (?, ?, ?, ?, ?, ?)",
+			)
+			.run(
+				"tm-1",
+				"#general",
+				"alice",
+				"hi",
+				"body",
+				"2026-06-19T00:00:02.000Z",
+			);
+
+		raw.close();
+	}
+
+	test("test_migration_v3_to_v4_should_add_last_seen_column_and_bump_version", () => {
+		seedV3Database(dbPath);
+
+		const db = openDatabase(dbPath);
+		db.close();
+
+		const raw = new Database(dbPath, { readonly: true });
+		assert.equal(raw.pragma("user_version", { simple: true }), 4);
+		assert.ok(
+			tableHasColumn(raw, "topic_subscriptions", "last_seen_message_id"),
+			"topic_subscriptions.last_seen_message_id must exist after migration",
+		);
+
+		const existing = raw
+			.prepare<
+				[],
+				{ subscriber_peer_id: string; last_seen_message_id: string | null }
+			>(
+				"SELECT subscriber_peer_id, last_seen_message_id FROM topic_subscriptions",
+			)
+			.get();
+		assert.equal(existing?.subscriber_peer_id, "alice");
+		assert.equal(
+			existing?.last_seen_message_id,
+			null,
+			"existing v3 subscribers must have NULL last_seen_message_id after v4 migration",
+		);
+		raw.close();
+	});
+
+	test("test_migration_v3_to_v4_should_set_null_on_topic_message_delete", () => {
+		seedV3Database(dbPath);
+
+		const db = openDatabase(dbPath);
+		db.close();
+
+		const raw = new Database(dbPath);
+		raw.pragma("foreign_keys = ON");
+		raw
+			.prepare(
+				"UPDATE topic_subscriptions SET last_seen_message_id = ? WHERE topic_id = ? AND subscriber_peer_id = ?",
+			)
+			.run("tm-1", "#general", "alice");
+
+		raw.prepare("DELETE FROM topic_messages WHERE id = ?").run("tm-1");
+
+		const row = raw
+			.prepare<[], { last_seen_message_id: string | null }>(
+				"SELECT last_seen_message_id FROM topic_subscriptions WHERE topic_id = '#general' AND subscriber_peer_id = 'alice'",
+			)
+			.get();
+		assert.equal(
+			row?.last_seen_message_id,
+			null,
+			"last_seen_message_id must be set to NULL when referenced topic_message is deleted",
+		);
+		raw.close();
+	});
+
+	test("test_fresh_database_should_be_at_user_version_4", () => {
+		const db = openDatabase(dbPath);
+		db.close();
+
+		const raw = new Database(dbPath, { readonly: true });
+		assert.equal(raw.pragma("user_version", { simple: true }), 4);
+		assert.ok(
+			tableHasColumn(raw, "topic_subscriptions", "last_seen_message_id"),
+			"fresh DB must include v4 last_seen_message_id column",
 		);
 		raw.close();
 	});
