@@ -16,6 +16,7 @@ import {
 	type TopicCreateRequest,
 	type TopicDetailRequest,
 	type TopicHistoryRequest,
+	type TopicMonitorRequest,
 	type TopicSendRequest,
 	type TopicSubscribeRequest,
 	type TopicUnsubscribeRequest,
@@ -185,6 +186,16 @@ const ISSUE_CREATE_BODY = {
 		body: { type: "string", maxLength: 65536 },
 	},
 	required: ["type", "title", "body"],
+	additionalProperties: false,
+};
+const TOPIC_MONITOR_BODY = {
+	type: "object",
+	properties: {
+		topicId: TOPIC_ID_SCHEMA,
+		peerId: PEER_ID_SCHEMA,
+		max: { type: "integer", minimum: 1, maximum: HISTORY_LIMIT_MAX },
+	},
+	required: ["topicId", "peerId"],
 	additionalProperties: false,
 };
 const CHANNEL_BROADCAST_BODY = {
@@ -367,6 +378,12 @@ export function createServer(opts: ServerOptions): Server {
 		HTTP_ENDPOINTS.issueCreate.path,
 		{ schema: { body: ISSUE_CREATE_BODY } },
 		async (req) => ({ ok: true, ...(await broker.issueCreate(req.body)) }),
+	);
+
+	app.post<{ Body: TopicMonitorRequest }>(
+		HTTP_ENDPOINTS.topicMonitor.path,
+		{ schema: { body: TOPIC_MONITOR_BODY } },
+		async (req) => ({ ok: true, ...broker.topicMonitor(req.body) }),
 	);
 
 	app.post<{ Body: ChannelBroadcastRequest }>(

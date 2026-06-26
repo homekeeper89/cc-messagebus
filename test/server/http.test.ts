@@ -737,5 +737,4 @@ describe("tail SSE", () => {
 	afterEach(async () => {
 		await server.stop();
 	});
-
 });

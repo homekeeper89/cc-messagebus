@@ -87,6 +87,7 @@ export const HTTP_ENDPOINTS = {
 	topicUnsubscribe: { method: "POST", path: "/api/topic_unsubscribe" },
 	topicHistory: { method: "POST", path: "/api/topic_history" },
 	topicDetail: { method: "POST", path: "/api/topic_detail" },
+	topicMonitor: { method: "POST", path: "/api/topic_monitor" },
 	diagnostics: { method: "POST", path: "/api/diagnostics" },
 	issueCreate: { method: "POST", path: "/api/issue_create" },
 	channelBroadcast: { method: "POST", path: "/api/channel_broadcast" },
@@ -202,6 +203,16 @@ export interface TopicDetailResponse {
 	topic: TopicDetailDto;
 }
 
+export interface TopicMonitorRequest {
+	topicId: TopicId;
+	peerId: PeerId;
+	max?: number;
+}
+export interface TopicMonitorResponse {
+	messages: TopicMessageDto[];
+	cursor: TopicMessageId | null;
+}
+
 export interface RecentRpcEntry {
 	method: string;
 	durationMs: number;
@@ -284,6 +295,7 @@ export type TopicSendApiResponse = ApiResponse<TopicSendResponse>;
 export type TopicUnsubscribeApiResponse = ApiResponse<TopicUnsubscribeResponse>;
 export type TopicHistoryApiResponse = ApiResponse<TopicHistoryResponse>;
 export type TopicDetailApiResponse = ApiResponse<TopicDetailResponse>;
+export type TopicMonitorApiResponse = ApiResponse<TopicMonitorResponse>;
 export type DiagnosticsApiResponse = ApiResponse<DiagnosticsResponse>;
 export type IssueCreateApiResponse = ApiResponse<IssueCreateResponse>;
 export type ChannelBroadcastApiResponse = ApiResponse<ChannelBroadcastResponse>;

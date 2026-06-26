@@ -11,6 +11,7 @@ import type {
 	TopicDetailResponse,
 	TopicHistoryResponse,
 	TopicId,
+	TopicMonitorResponse,
 	TopicSendResponse,
 	TopicSubscribeResponse,
 	TopicUnsubscribeResponse,
@@ -33,6 +34,7 @@ export const MCP_TOOL_NAMES = {
 	topicUnsubscribe: "topic_unsubscribe",
 	topicHistory: "topic_history",
 	topicDetail: "topic_detail",
+	topicMonitor: "topic_monitor",
 } as const;
 
 export type McpToolKey = keyof typeof MCP_TOOL_NAMES;
@@ -101,6 +103,12 @@ export interface TopicDetailToolInput {
 }
 export type TopicDetailToolOutput = TopicDetailResponse;
 
+export interface TopicMonitorToolInput {
+	topicId: TopicId;
+	max?: number;
+}
+export type TopicMonitorToolOutput = TopicMonitorResponse;
+
 // WARNING: The `register` description AND the `topic_subscribe`
 // description below are wire-critical. The register flow relies on
 // Claude auto-invoking Monitor; the topic_subscribe flow relies on
@@ -129,6 +137,8 @@ export const MCP_TOOL_DESCRIPTIONS: Record<McpToolKey, string> = {
 		"Pull past canonical messages of a topic for late-joining context. Returns up to `limit` messages (default broker-decided) ordered by sentAt desc. Use `beforeSentAt` as a cursor for pagination.",
 	topicDetail:
 		"Inspect a topic's subscribers with per-subscriber queue stats (queueDepth, lastReadAt). No ACL — any session can read. Returns TOPIC_NOT_FOUND if the topicId does not exist.",
+	topicMonitor:
+		"Fetch unread topic messages since this session's last cursor and advance the cursor atomically. Returns up to `max` messages (default broker-decided) ordered by sentAt asc, plus the new cursor. Requires an active subscription (NOT_SUBSCRIBED otherwise). Unlike topic_history (which is read-only browsing), topic_monitor mutates per-subscriber cursor state — call it repeatedly to drain the topic.",
 };
 
 export type JsonSchema = Record<string, unknown>;
@@ -209,6 +219,15 @@ export const MCP_INPUT_SCHEMAS: Record<McpToolKey, JsonSchema> = {
 	topicDetail: {
 		type: "object",
 		properties: { topicId: TOPIC_ID_SCHEMA },
+		required: ["topicId"],
+		additionalProperties: false,
+	},
+	topicMonitor: {
+		type: "object",
+		properties: {
+			topicId: TOPIC_ID_SCHEMA,
+			max: { type: "integer", minimum: 1, maximum: 200 },
+		},
 		required: ["topicId"],
 		additionalProperties: false,
 	},
