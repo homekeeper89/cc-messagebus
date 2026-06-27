@@ -5,8 +5,8 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, test } from "node:test";
 import {
 	type Broker,
-	type BrokerOptions,
 	BrokerError,
+	type BrokerOptions,
 	createBroker,
 	RING_BUFFER_CAPACITY,
 } from "../../src/server/broker.js";
@@ -77,9 +77,7 @@ describe("broker.diagnostics + ring buffer", () => {
 		const newest = snap.recentRpcList[snap.recentRpcList.length - 1];
 		assert.equal(newest?.method, "listPeers");
 		assert.equal(newest?.error, null);
-		assert.ok(
-			typeof newest?.durationMs === "number" && newest.durationMs >= 0,
-		);
+		assert.ok(typeof newest?.durationMs === "number" && newest.durationMs >= 0);
 	});
 
 	test("errored RPC is recorded in both rpc and error rings", () => {
