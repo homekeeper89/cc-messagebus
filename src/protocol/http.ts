@@ -262,20 +262,16 @@ export interface ChannelBroadcastResponse {
 	sentAt: IsoTimestamp;
 }
 
-// confirm must strictly equal topicId; otherwise broker rejects with VALIDATION_FAILED.
 export interface ChannelDeleteRequest {
 	topicId: TopicId;
-	confirm: string;
 }
 export interface ChannelDeleteResponse {
 	deletedMessages: number;
 	deletedSubs: number;
 }
 
-// confirm must strictly equal peerId; otherwise broker rejects with VALIDATION_FAILED.
 export interface PeerDeleteRequest {
 	peerId: PeerId;
-	confirm: string;
 }
 export interface PeerDeleteResponse {
 	deletedSubs: number;
