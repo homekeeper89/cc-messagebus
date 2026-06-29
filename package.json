@@ -23,7 +23,7 @@
 	],
 	"type": "module",
 	"bin": {
-		"cc-messagebus": "./bin/cc-messagebus"
+		"cc-messagebus": "bin/cc-messagebus"
 	},
 	"files": [
 		"bin",
