@@ -1,0 +1,10 @@
+{
+  "name": "cc-messagebus",
+  "version": "0.3.2",
+  "description": "Cross-session message bus for Claude Code with central observability",
+  "author": {
+    "name": "KimJangHoon"
+  },
+  "homepage": "https://github.com/homekeeper89/cc-messagebus",
+  "license": "MIT"
+}

@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "cc-messagebus": {
+      "type": "stdio",
+      "command": "npx",
+      "args": ["-y", "cc-messagebus@latest", "mcp"]
+    }
+  }
+}
