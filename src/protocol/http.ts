@@ -89,7 +89,7 @@ export const HTTP_ENDPOINTS = {
 	topicDetail: { method: "POST", path: "/api/topic_detail" },
 	topicMonitor: { method: "POST", path: "/api/topic_monitor" },
 	diagnostics: { method: "POST", path: "/api/diagnostics" },
-	issueCreate: { method: "POST", path: "/api/issue_create" },
+	serverInfo: { method: "POST", path: "/api/server_info" },
 	channelBroadcast: { method: "POST", path: "/api/channel_broadcast" },
 	channelDelete: { method: "POST", path: "/api/channel_delete" },
 	peerDelete: { method: "POST", path: "/api/peer_delete" },
@@ -238,16 +238,9 @@ export interface DiagnosticsResponse {
 	recentErrorList: RecentErrorEntry[];
 }
 
-export type IssueType = "bug" | "feature" | "note";
-
-export interface IssueCreateRequest {
-	type: IssueType;
-	title: string;
-	body: string;
-}
-export interface IssueCreateResponse {
-	issueNumber: number;
-	url: string;
+export interface ServerInfoResponse {
+	issueRepo: string | null;
+	version: string;
 }
 
 export interface ChannelBroadcastRequest {
@@ -293,7 +286,7 @@ export type TopicHistoryApiResponse = ApiResponse<TopicHistoryResponse>;
 export type TopicDetailApiResponse = ApiResponse<TopicDetailResponse>;
 export type TopicMonitorApiResponse = ApiResponse<TopicMonitorResponse>;
 export type DiagnosticsApiResponse = ApiResponse<DiagnosticsResponse>;
-export type IssueCreateApiResponse = ApiResponse<IssueCreateResponse>;
+export type ServerInfoApiResponse = ApiResponse<ServerInfoResponse>;
 export type ChannelBroadcastApiResponse = ApiResponse<ChannelBroadcastResponse>;
 export type ChannelDeleteApiResponse = ApiResponse<ChannelDeleteResponse>;
 export type PeerDeleteApiResponse = ApiResponse<PeerDeleteResponse>;
