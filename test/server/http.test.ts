@@ -704,6 +704,19 @@ describe("http", () => {
 		assert.equal(bob.queueDepth, 1);
 		assert.equal(bob.lastReadAt, null);
 	});
+
+	test("POST /api/server_info returns issueRepo + version", async () => {
+		const res = await server.app.inject({
+			method: "POST",
+			url: "/api/server_info",
+			payload: {},
+		});
+		assert.equal(res.statusCode, 200);
+		const body = res.json();
+		assert.equal(body.ok, true);
+		assert.equal(body.issueRepo, null);
+		assert.ok(typeof body.version === "string" && body.version.length > 0);
+	});
 });
 
 describe("tail SSE", () => {
