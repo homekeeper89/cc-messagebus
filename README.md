@@ -4,7 +4,7 @@ Claude Code 세션 간 메시지 큐 + Pub-Sub 토픽 + 실시간 대시보드. 
 
 - **DM (1:1 메시지 큐)**: at-least-once, visibility timeout 30s, TTL 30일
 - **Pub-Sub Topic**: N:M fan-out, subscriber 별 독립 큐 + read/ack 라이프사이클, history 조회
-- **MCP stdio adapter**: Claude Code 에 세션 도구 (`register / unregister / read / ack / list_peers`) + 토픽 도구 (`list_topics / topic_create / topic_subscribe / topic_send / topic_unsubscribe / topic_history / topic_detail`) 노출. 0.3.0 부터 1:1 DM `send` 는 MCP 노출에서 제외 (topic 사용 권장). HTTP `/send` RPC 는 운영자 도구용으로 유지.
+- **MCP stdio adapter**: Claude Code 에 세션 도구 (`register / unregister / read / ack / list_peers`) + 토픽 도구 (`list_topics / topic_create / topic_subscribe / topic_send / topic_unsubscribe / topic_history / topic_detail / topic_monitor`) 노출. 0.3.0 부터 1:1 DM `send` 는 MCP 노출에서 제외 (topic 사용 권장). HTTP `/send` RPC 는 운영자 도구용으로 유지.
 - **SSE 알림**: `cc-messagebus tail <peerId>` 가 stdout 으로 라인 푸시 → Claude `Monitor` 도구가 즉시 수신
 - **대시보드**: `http://127.0.0.1:5959/dashboard` 에서 등록 peer 목록 + topic 목록 + 메시지 흐름 라이브 관찰
 
@@ -80,6 +80,8 @@ cc-messagebus dashboard
 
 좌측 사이드바는 두 섹션 — `PEERS` (등록 세션 + 마지막 활동 시각 + 상태) 와 `TOPICS` (생성 토픽 + subscriber 수 + 최근 publish 시각) — 가 SSE 로 실시간 갱신됩니다. topic 을 선택하면 우측이 detail view (헤더 + subscriber 카드 + history) 로 전환되어 `queueDepth` / `lastReadAt` / 신규 publish 이벤트가 즉시 반영됩니다. peer 를 선택하면 해당 peer 와 연결된 메시지 라이프사이클(`sent / read / acked / redelivered / expired`) 흐름이 push 됩니다.
 
+대시보드에는 운영자 도구도 포함됩니다: 선택한 topic 으로 broadcast 발행, topic / peer 삭제, broker diagnostics 패널, 그리고 우상단 "Create GitHub issue" 버튼 (bug / feature / note 타입 선택 → label 자동 매핑 + prefilled GitHub issue URL 새 탭 오픈; `~/.cc-messagebus/config.json` 의 `issueRepo` 가 설정돼야 활성화됩니다).
+
 ## CLI Reference
 
 | Command | Description |
@@ -118,6 +120,7 @@ Topic 은 ACL 이 없습니다 — 누구나 `list_topics` / `topic_history` / `
 | `topic_unsubscribe` | `{ topicId }` | `{ unsubscribedAt }` | `PEER_NOT_FOUND`, `TOPIC_NOT_FOUND`, `NOT_SUBSCRIBED` |
 | `topic_history` | `{ topicId, limit?: 1..200 (default 50), beforeSentAt? }` | `{ messages: TopicMessageDto[], hasMore: boolean }` | `TOPIC_NOT_FOUND`, `VALIDATION_FAILED` |
 | `topic_detail` | `{ topicId }` | `{ topic: TopicDetailDto }` | `TOPIC_NOT_FOUND` |
+| `topic_monitor` | `{ topicId, max?: 1..200 (default 50) }` | `{ messages: TopicMessageDto[], cursor: string \| null }` | `TOPIC_NOT_FOUND`, `NOT_SUBSCRIBED`, `VALIDATION_FAILED` |
 
 ### Response shapes
 
@@ -202,6 +205,20 @@ interface TopicMessageDto {
 | `CC_MESSAGEBUS_DB` | `~/.cc-messagebus/data.db` | SQLite 파일 경로 |
 | `CC_MESSAGEBUS_URL` | `http://127.0.0.1:5959` | `tail` / `dashboard` 가 접속할 broker base URL |
 
+### `~/.cc-messagebus/config.json`
+
+선택 사항. broker 부팅 시 한 번 읽힘 → 값 변경 후에는 broker 재시작 필요.
+
+| Key | Description |
+|---|---|
+| `issueRepo` | 대시보드 "Create GitHub issue" 버튼 대상 repo (`owner/repo` 형식). 미설정 시 버튼 비활성. |
+
+```json
+{
+  "issueRepo": "homekeeper89/cc-messagebus"
+}
+```
+
 ### Server defaults (`serve`)
 
 | Knob | Default |
@@ -243,7 +260,7 @@ interface TopicMessageDto {
 - **Persistence**: SQLite 단일 파일 (`peers`, `messages`, `topics`, `topic_subscriptions`, `topic_messages` 테이블)
 - **Process model**: 단일 daemon, 단일 SQLite writer
 
-## Not Building (v0.2)
+## Not Building (v0.3)
 
 - 인증 / 인가 / TLS — 로컬(`127.0.0.1`) 한정
 - 메시지 암호화
