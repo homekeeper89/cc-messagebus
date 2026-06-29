@@ -2017,6 +2017,12 @@
 				return parts.join("\n");
 			}
 
+			const ISSUE_TYPE_TO_LABEL = {
+				bug: "bug",
+				feature: "enhancement",
+				note: "documentation",
+			};
+
 			function selectedIssueType() {
 				const checked = issueForm.querySelector(
 					'input[name="issue-type"]:checked',
@@ -2096,7 +2102,11 @@
 						return;
 					}
 					const prefixedTitle = `[${type}] ${title}`;
-					const params = new URLSearchParams({ title: prefixedTitle, body });
+					const params = new URLSearchParams({
+						title: prefixedTitle,
+						body,
+						labels: ISSUE_TYPE_TO_LABEL[type],
+					});
 					const url = `https://github.com/${info.issueRepo}/issues/new?${params.toString()}`;
 					window.open(url, "_blank", "noopener,noreferrer");
 					issueStatusEl.dataset.state = "ok";
