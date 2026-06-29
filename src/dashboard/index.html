@@ -760,15 +760,15 @@
 					<span class="tree-label">ALL</span>
 				</div>
 				<div class="tree-section">
-					<h2>Peers <span id="peers-count">(0)</span></h2>
-					<ul id="peers" class="tree-list">
-						<li class="empty">(no peers)</li>
-					</ul>
-				</div>
-				<div class="tree-section">
 					<h2>Topics <span id="topics-count">(0)</span></h2>
 					<ul id="topics" class="tree-list">
 						<li class="empty">(no topics)</li>
+					</ul>
+				</div>
+				<div class="tree-section">
+					<h2>Peers <span id="peers-count">(0)</span></h2>
+					<ul id="peers" class="tree-list">
+						<li class="empty">(no peers)</li>
 					</ul>
 				</div>
 			</aside>
@@ -797,22 +797,13 @@
 							/>
 						</label>
 						<label>
-							Subject
-							<input
-								type="text"
-								id="broadcast-subject"
-								name="subject"
-								maxlength="256"
-								required
-							/>
-						</label>
-						<label>
-							Body (markdown)
+							Message (first line = subject)
 							<textarea
-								id="broadcast-body"
-								name="body"
+								id="broadcast-message"
+								name="message"
 								maxlength="65536"
 								required
+								rows="6"
 							></textarea>
 						</label>
 						<p class="err" id="broadcast-err"></p>
@@ -880,12 +871,10 @@
 			<div class="modal" role="dialog" aria-modal="true">
 				<h3 id="confirm-title">Confirm deletion</h3>
 				<p id="confirm-body"></p>
-				<p>Type <code id="confirm-expected"></code> to confirm:</p>
-				<input type="text" id="confirm-input" autocomplete="off" />
 				<p class="err" id="confirm-err"></p>
 				<div class="row">
 					<button type="button" class="ghost" id="confirm-cancel">Cancel</button>
-					<button type="button" class="danger" id="confirm-ok" disabled>Delete</button>
+					<button type="button" class="danger" id="confirm-ok">Delete</button>
 				</div>
 			</div>
 		</div>
@@ -924,16 +913,13 @@
 			const broadcastToggleBtn = document.getElementById("broadcast-toggle");
 			const broadcastForm = document.getElementById("broadcast-form");
 			const broadcastFromEl = document.getElementById("broadcast-from");
-			const broadcastSubjectEl = document.getElementById("broadcast-subject");
-			const broadcastBodyEl = document.getElementById("broadcast-body");
+			const broadcastMessageEl = document.getElementById("broadcast-message");
 			const broadcastErrEl = document.getElementById("broadcast-err");
 			const broadcastCancelBtn = document.getElementById("broadcast-cancel");
 			const topicDeleteBtn = document.getElementById("topic-delete");
 			const confirmModal = document.getElementById("confirm-modal");
 			const confirmTitleEl = document.getElementById("confirm-title");
 			const confirmBodyEl = document.getElementById("confirm-body");
-			const confirmExpectedEl = document.getElementById("confirm-expected");
-			const confirmInputEl = document.getElementById("confirm-input");
 			const confirmErrEl = document.getElementById("confirm-err");
 			const confirmOkBtn = document.getElementById("confirm-ok");
 			const confirmCancelBtn = document.getElementById("confirm-cancel");
@@ -1313,16 +1299,14 @@
 				broadcastErrEl.textContent = "";
 			}
 
-			function openConfirmModal({ title, body, expected, onConfirm }) {
-				pendingConfirm = { expected, onConfirm };
+			function openConfirmModal({ title, body, onConfirm }) {
+				pendingConfirm = { onConfirm };
 				confirmTitleEl.textContent = title;
 				confirmBodyEl.textContent = body;
-				confirmExpectedEl.textContent = expected;
-				confirmInputEl.value = "";
 				confirmErrEl.textContent = "";
-				confirmOkBtn.disabled = true;
+				confirmOkBtn.disabled = false;
 				confirmModal.hidden = false;
-				confirmInputEl.focus();
+				confirmOkBtn.focus();
 			}
 
 			function closeConfirmModal() {
@@ -1330,19 +1314,12 @@
 				pendingConfirm = null;
 			}
 
-			confirmInputEl.addEventListener("input", () => {
-				if (!pendingConfirm) return;
-				confirmOkBtn.disabled =
-					confirmInputEl.value !== pendingConfirm.expected;
-				confirmErrEl.textContent = "";
-			});
 			confirmCancelBtn.addEventListener("click", closeConfirmModal);
 			confirmModal.addEventListener("click", (e) => {
 				if (e.target === confirmModal) closeConfirmModal();
 			});
 			confirmOkBtn.addEventListener("click", async () => {
 				if (!pendingConfirm) return;
-				if (confirmInputEl.value !== pendingConfirm.expected) return;
 				confirmOkBtn.disabled = true;
 				try {
 					await pendingConfirm.onConfirm();
@@ -1372,7 +1349,7 @@
 			broadcastToggleBtn.addEventListener("click", () => {
 				broadcastForm.hidden = !broadcastForm.hidden;
 				broadcastErrEl.textContent = "";
-				if (!broadcastForm.hidden) broadcastSubjectEl.focus();
+				if (!broadcastForm.hidden) broadcastMessageEl.focus();
 			});
 			broadcastCancelBtn.addEventListener("click", () => {
 				broadcastForm.hidden = true;
@@ -1382,10 +1359,13 @@
 				e.preventDefault();
 				if (!topicDetail) return;
 				const from = broadcastFromEl.value.trim();
-				const subject = broadcastSubjectEl.value.trim();
-				const body = broadcastBodyEl.value;
-				if (!from || !subject || !body) {
-					broadcastErrEl.textContent = "from / subject / body required";
+				const message = broadcastMessageEl.value;
+				const newlineIdx = message.indexOf("\n");
+				const subject =
+					newlineIdx === -1 ? message.trim() : message.slice(0, newlineIdx).trim();
+				const body = newlineIdx === -1 ? "" : message.slice(newlineIdx + 1);
+				if (!from || !subject) {
+					broadcastErrEl.textContent = "from / message required";
 					return;
 				}
 				broadcastErrEl.textContent = "";
@@ -1396,8 +1376,7 @@
 						subject,
 						body,
 					});
-					broadcastSubjectEl.value = "";
-					broadcastBodyEl.value = "";
+					broadcastMessageEl.value = "";
 					broadcastForm.hidden = true;
 				} catch (err) {
 					broadcastErrEl.textContent =
@@ -1411,12 +1390,8 @@
 				openConfirmModal({
 					title: "Delete topic",
 					body: `Channel "${topicId}" and all its messages will be removed.`,
-					expected: topicId,
 					onConfirm: async () => {
-						await postJson("/api/channel_delete", {
-							topicId,
-							confirm: topicId,
-						});
+						await postJson("/api/channel_delete", { topicId });
 					},
 				});
 			});
@@ -1425,12 +1400,8 @@
 				openConfirmModal({
 					title: "Delete peer",
 					body: `Peer "${peerId}" subscriptions and inbox will be removed.`,
-					expected: peerId,
 					onConfirm: async () => {
-						await postJson("/api/peer_delete", {
-							peerId,
-							confirm: peerId,
-						});
+						await postJson("/api/peer_delete", { peerId });
 					},
 				});
 			}
