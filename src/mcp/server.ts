@@ -160,6 +160,15 @@ export async function runMcp(opts: RunMcpOptions = {}): Promise<void> {
 	const client = opts.client ?? createBrokerClient(baseUrl);
 	const spawnCmd = opts.spawnCmd ?? defaultSpawnCmd();
 
+	try {
+		await ensureBrokerRunning(client, spawnCmd);
+	} catch (e) {
+		// best-effort: dashboard 즉시 동작이 안 되더라도 MCP server는 계속 살아 있음.
+		// 첫 register 호출 시 dispatch에서 다시 시도한다.
+		const message = e instanceof Error ? e.message : String(e);
+		process.stderr.write(`[cc-messagebus] broker auto-spawn failed: ${message}\n`);
+	}
+
 	const server = new Server(
 		{ name: "cc-messagebus", version: PKG_VERSION },
 		{ capabilities: { tools: {} } },
