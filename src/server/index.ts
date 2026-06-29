@@ -209,17 +209,16 @@ const CHANNEL_BROADCAST_BODY = {
 	required: ["topicId", "from", "subject", "body"],
 	additionalProperties: false,
 };
-const CONFIRM_SCHEMA = { type: "string", maxLength: 64 };
 const CHANNEL_DELETE_BODY = {
 	type: "object",
-	properties: { topicId: TOPIC_ID_SCHEMA, confirm: CONFIRM_SCHEMA },
-	required: ["topicId", "confirm"],
+	properties: { topicId: TOPIC_ID_SCHEMA },
+	required: ["topicId"],
 	additionalProperties: false,
 };
 const PEER_DELETE_BODY = {
 	type: "object",
-	properties: { peerId: PEER_ID_SCHEMA, confirm: CONFIRM_SCHEMA },
-	required: ["peerId", "confirm"],
+	properties: { peerId: PEER_ID_SCHEMA },
+	required: ["peerId"],
 	additionalProperties: false,
 };
 

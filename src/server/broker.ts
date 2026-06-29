@@ -130,11 +130,7 @@ export function createBroker(db: CcDatabase, opts: BrokerOptions): Broker {
 		return e instanceof Error ? e.message : String(e);
 	}
 
-	function recordRpc(
-		method: string,
-		startedMs: number,
-		error: unknown,
-	): void {
+	function recordRpc(method: string, startedMs: number, error: unknown): void {
 		const at = nowIso();
 		pushRing(recentRpcList, {
 			method,
@@ -734,12 +730,6 @@ export function createBroker(db: CcDatabase, opts: BrokerOptions): Broker {
 	}
 
 	function channelDelete(req: ChannelDeleteRequest): ChannelDeleteResponse {
-		if (req.confirm !== req.topicId) {
-			throw new BrokerError(
-				"VALIDATION_FAILED",
-				"confirm string must exactly match topicId",
-			);
-		}
 		let stats: { deletedMessages: number; deletedSubs: number };
 		try {
 			stats = db.deleteTopic(req.topicId);
@@ -764,12 +754,6 @@ export function createBroker(db: CcDatabase, opts: BrokerOptions): Broker {
 	}
 
 	function peerDelete(req: PeerDeleteRequest): PeerDeleteResponse {
-		if (req.confirm !== req.peerId) {
-			throw new BrokerError(
-				"VALIDATION_FAILED",
-				"confirm string must exactly match peerId",
-			);
-		}
 		const existing = db.getSession(req.peerId);
 		if (!existing) {
 			throw new BrokerError(

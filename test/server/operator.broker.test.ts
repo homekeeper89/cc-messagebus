@@ -176,10 +176,7 @@ describe("broker operator RPC", () => {
 				body: "y",
 			});
 
-			const result = broker.channelDelete({
-				topicId: "ch-1",
-				confirm: "ch-1",
-			});
+			const result = broker.channelDelete({ topicId: "ch-1" });
 
 			assert.equal(result.deletedSubs, 3);
 			// 2 messages × 2 subscribers (bob, carol; alice 는 sender 제외) = 4
@@ -194,23 +191,9 @@ describe("broker operator RPC", () => {
 			assert.equal(broker.read({ peerId: "carol" }).messages.length, 0);
 		});
 
-		test("throws VALIDATION_FAILED when confirm does not match topicId", () => {
-			broker.register({ peerId: "alice" });
-			broker.topicCreate({ topicId: "ch-1", createdBy: "alice" });
-
-			assert.throws(
-				() => broker.channelDelete({ topicId: "ch-1", confirm: "ch-2" }),
-				(err: unknown) =>
-					err instanceof BrokerError && err.code === "VALIDATION_FAILED",
-			);
-			const detail = broker.topicDetail({ topicId: "ch-1" });
-			assert.equal(detail.topic.topicId, "ch-1");
-		});
-
 		test("throws TOPIC_NOT_FOUND on missing topic", () => {
 			assert.throws(
-				() =>
-					broker.channelDelete({ topicId: "ghost-ch", confirm: "ghost-ch" }),
+				() => broker.channelDelete({ topicId: "ghost-ch" }),
 				(err: unknown) =>
 					err instanceof BrokerError && err.code === "TOPIC_NOT_FOUND",
 			);
@@ -237,7 +220,7 @@ describe("broker operator RPC", () => {
 				event = e as typeof event;
 			});
 
-			broker.channelDelete({ topicId: "ch-1", confirm: "ch-1" });
+			broker.channelDelete({ topicId: "ch-1" });
 			assert.ok(event);
 			const ev = event as unknown as {
 				topicId: string;
@@ -266,7 +249,7 @@ describe("broker operator RPC", () => {
 
 			assert.equal(broker.read({ peerId: "bob" }).messages.length, 1);
 
-			const result = broker.peerDelete({ peerId: "bob", confirm: "bob" });
+			const result = broker.peerDelete({ peerId: "bob" });
 			assert.equal(result.deletedSubs, 1);
 
 			broker.register({ peerId: "bob" });
@@ -297,24 +280,13 @@ describe("broker operator RPC", () => {
 
 			broker.read({ peerId: "bob" });
 
-			const result = broker.peerDelete({ peerId: "bob", confirm: "bob" });
+			const result = broker.peerDelete({ peerId: "bob" });
 			assert.equal(result.cancelledInflight, 2);
-		});
-
-		test("throws VALIDATION_FAILED when confirm does not match peerId", () => {
-			broker.register({ peerId: "alice" });
-			assert.throws(
-				() => broker.peerDelete({ peerId: "alice", confirm: "bob" }),
-				(err: unknown) =>
-					err instanceof BrokerError && err.code === "VALIDATION_FAILED",
-			);
-			const peers = broker.listPeers().peers;
-			assert.ok(peers.some((p) => p.peerId === "alice"));
 		});
 
 		test("throws PEER_NOT_FOUND on missing peer", () => {
 			assert.throws(
-				() => broker.peerDelete({ peerId: "ghost", confirm: "ghost" }),
+				() => broker.peerDelete({ peerId: "ghost" }),
 				(err: unknown) =>
 					err instanceof BrokerError && err.code === "PEER_NOT_FOUND",
 			);
@@ -335,7 +307,7 @@ describe("broker operator RPC", () => {
 				event = e as typeof event;
 			});
 
-			broker.peerDelete({ peerId: "bob", confirm: "bob" });
+			broker.peerDelete({ peerId: "bob" });
 			assert.ok(event);
 			const ev = event as unknown as {
 				peerId: string;
