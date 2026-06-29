@@ -8,9 +8,7 @@ export type ErrorCode =
 	| "TOPIC_NOT_FOUND"
 	| "TOPIC_ALREADY_EXISTS"
 	| "ALREADY_SUBSCRIBED"
-	| "NOT_SUBSCRIBED"
-	| "ISSUE_REPO_NOT_CONFIGURED"
-	| "ISSUE_CLIENT_FAILED";
+	| "NOT_SUBSCRIBED";
 
 export const errorCodeToHttpStatus = {
 	PEER_ALREADY_REGISTERED: 409,
@@ -23,8 +21,6 @@ export const errorCodeToHttpStatus = {
 	TOPIC_ALREADY_EXISTS: 409,
 	ALREADY_SUBSCRIBED: 409,
 	NOT_SUBSCRIBED: 404,
-	ISSUE_REPO_NOT_CONFIGURED: 412,
-	ISSUE_CLIENT_FAILED: 502,
 } as const satisfies Record<ErrorCode, number>;
 
 export interface ApiError {
