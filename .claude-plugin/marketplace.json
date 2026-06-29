@@ -1,0 +1,14 @@
+{
+  "name": "cc-messagebus",
+  "owner": {
+    "name": "homekeeper89",
+    "url": "https://github.com/homekeeper89"
+  },
+  "plugins": [
+    {
+      "name": "cc-messagebus",
+      "source": "./plugin",
+      "description": "Cross-session message bus for Claude Code with central observability"
+    }
+  ]
+}
