@@ -1,7 +1,26 @@
 {
 	"name": "cc-messagebus",
-	"version": "0.2.0",
+	"version": "0.3.0",
 	"description": "Cross-session message bus for Claude Code with central observability",
+	"license": "MIT",
+	"author": "KimJangHoon",
+	"homepage": "https://github.com/homekeeper89/cc-messagebus#readme",
+	"repository": {
+		"type": "git",
+		"url": "git+https://github.com/homekeeper89/cc-messagebus.git"
+	},
+	"bugs": {
+		"url": "https://github.com/homekeeper89/cc-messagebus/issues"
+	},
+	"keywords": [
+		"claude-code",
+		"mcp",
+		"message-bus",
+		"pub-sub",
+		"sse",
+		"sqlite",
+		"broker"
+	],
 	"type": "module",
 	"bin": {
 		"cc-messagebus": "./bin/cc-messagebus"
@@ -20,7 +39,8 @@
 		"lint": "biome lint",
 		"format": "biome format --write",
 		"check": "biome check --write",
-		"test": "node --test --import tsx 'test/**/*.test.ts'"
+		"test": "node --test --import tsx 'test/**/*.test.ts'",
+		"prepublishOnly": "npm run build"
 	},
 	"dependencies": {
 		"@modelcontextprotocol/sdk": "^1.0.0",
