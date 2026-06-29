@@ -5,13 +5,11 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, test } from "node:test";
 import {
 	type Broker,
-	BrokerError,
 	type BrokerOptions,
 	createBroker,
 	RING_BUFFER_CAPACITY,
 } from "../../src/server/broker.js";
 import { type CcDatabase, openDatabase } from "../../src/server/db.js";
-import { IssueClientError } from "../../src/server/issue.js";
 
 function uniqueDbPath(): string {
 	return join(
@@ -36,7 +34,7 @@ describe("broker.diagnostics + ring buffer", () => {
 
 	function makeBroker(
 		overrides: Partial<
-			Pick<BrokerOptions, "issueClient" | "getDbSizeByte" | "version">
+			Pick<BrokerOptions, "issueRepo" | "getDbSizeByte" | "version">
 		> = {},
 	): Broker {
 		return createBroker(db, {
@@ -45,7 +43,7 @@ describe("broker.diagnostics + ring buffer", () => {
 			dashboardUrl: "http://localhost:5959",
 			version: overrides.version ?? "9.9.9",
 			getDbSizeByte: overrides.getDbSizeByte ?? ((): number => 0),
-			issueClient: overrides.issueClient ?? null,
+			issueRepo: overrides.issueRepo ?? null,
 		});
 	}
 
@@ -108,52 +106,19 @@ describe("broker.diagnostics + ring buffer", () => {
 		);
 	});
 
-	test("issueCreate without issueClient throws ISSUE_REPO_NOT_CONFIGURED", async () => {
-		const broker = makeBroker({ issueClient: null });
-		await assert.rejects(
-			() => broker.issueCreate({ type: "bug", title: "t", body: "b" }),
-			(e: unknown) => {
-				assert.ok(e instanceof BrokerError);
-				assert.equal(e.code, "ISSUE_REPO_NOT_CONFIGURED");
-				return true;
-			},
-		);
+	test("serverInfo returns configured issueRepo and version", () => {
+		const broker = makeBroker({
+			issueRepo: "owner/repo",
+			version: "1.2.3",
+		});
+		assert.deepEqual(broker.serverInfo(), {
+			issueRepo: "owner/repo",
+			version: "1.2.3",
+		});
 	});
 
-	test("issueCreate forwards to issueClient and returns issueNumber + url", async () => {
-		const broker = makeBroker({
-			issueClient: {
-				create: async () => ({
-					issueNumber: 7,
-					url: "https://github.com/x/y/issues/7",
-				}),
-			},
-		});
-		const result = await broker.issueCreate({
-			type: "feature",
-			title: "t",
-			body: "b",
-		});
-		assert.equal(result.issueNumber, 7);
-		assert.equal(result.url, "https://github.com/x/y/issues/7");
-	});
-
-	test("issueCreate wraps IssueClientError as ISSUE_CLIENT_FAILED with details", async () => {
-		const broker = makeBroker({
-			issueClient: {
-				create: async () => {
-					throw new IssueClientError("gh not found", { code: "ENOENT" });
-				},
-			},
-		});
-		await assert.rejects(
-			() => broker.issueCreate({ type: "bug", title: "t", body: "b" }),
-			(e: unknown) => {
-				assert.ok(e instanceof BrokerError);
-				assert.equal(e.code, "ISSUE_CLIENT_FAILED");
-				assert.deepEqual(e.details, { code: "ENOENT" });
-				return true;
-			},
-		);
+	test("serverInfo returns null issueRepo when unset", () => {
+		const broker = makeBroker({ issueRepo: null });
+		assert.equal(broker.serverInfo().issueRepo, null);
 	});
 });

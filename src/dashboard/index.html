@@ -277,7 +277,7 @@
 				margin: 0;
 				padding: 0;
 			}
-			#detail .card-list li {
+			#detail .card-list > li {
 				display: grid;
 				grid-template-columns: 1fr auto auto auto;
 				gap: 12px;
@@ -1935,6 +1935,26 @@
 				return null;
 			}
 
+			let serverInfoCache = null;
+			async function fetchServerInfo() {
+				if (serverInfoCache) return serverInfoCache;
+				try {
+					const res = await fetch("/api/server_info", {
+						method: "POST",
+						headers: { "Content-Type": "application/json" },
+						body: "{}",
+					});
+					const json = await res.json();
+					if (json?.ok) {
+						serverInfoCache = { issueRepo: json.issueRepo, version: json.version };
+						return serverInfoCache;
+					}
+				} catch {
+					// fall through
+				}
+				return null;
+			}
+
 			function formatServerDiag(d) {
 				if (!d) return "(diagnostics unavailable)";
 				const lines = [
@@ -2066,26 +2086,22 @@
 				const body = composeIssueBody();
 				issueSubmitBtn.disabled = true;
 				issueStatusEl.dataset.state = "";
-				issueStatusEl.textContent = "creating…";
+				issueStatusEl.textContent = "opening GitHub…";
 				try {
-					const res = await fetch("/api/issue_create", {
-						method: "POST",
-						headers: { "Content-Type": "application/json" },
-						body: JSON.stringify({ type, title, body }),
-					});
-					const json = await res.json();
-					if (!json?.ok) {
+					const info = await fetchServerInfo();
+					if (!info?.issueRepo) {
 						issueStatusEl.dataset.state = "error";
 						issueStatusEl.textContent =
-							json?.error?.message ?? `failed (status ${res.status})`;
+							"issueRepo not configured in ~/.cc-messagebus/config.json";
 						return;
 					}
+					const prefixedTitle = `[${type}] ${title}`;
+					const params = new URLSearchParams({ title: prefixedTitle, body });
+					const url = `https://github.com/${info.issueRepo}/issues/new?${params.toString()}`;
+					window.open(url, "_blank", "noopener,noreferrer");
 					issueStatusEl.dataset.state = "ok";
-					issueStatusEl.textContent = `created #${json.issueNumber} → ${json.url}`;
-					setTimeout(() => issueModal.close(), 1500);
-				} catch (err) {
-					issueStatusEl.dataset.state = "error";
-					issueStatusEl.textContent = err?.message ?? String(err);
+					issueStatusEl.textContent = "opened GitHub in a new tab";
+					setTimeout(() => issueModal.close(), 1200);
 				} finally {
 					issueSubmitBtn.disabled = false;
 				}

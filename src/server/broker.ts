@@ -9,8 +9,6 @@ import type {
 	ChannelDeleteRequest,
 	ChannelDeleteResponse,
 	DiagnosticsResponse,
-	IssueCreateRequest,
-	IssueCreateResponse,
 	ListPeersResponse,
 	ListTopicsResponse,
 	MessageDto,
@@ -26,6 +24,7 @@ import type {
 	RegisterResponse,
 	SendRequest,
 	SendResponse,
+	ServerInfoResponse,
 	TopicCreateRequest,
 	TopicCreateResponse,
 	TopicDetailRequest,
@@ -48,7 +47,6 @@ import type {
 } from "../protocol/http.js";
 import type { DashboardEvent } from "../protocol/sse.js";
 import { type CcDatabase, DbError } from "./db.js";
-import { type IssueClient, IssueClientError } from "./issue.js";
 
 export class BrokerError extends Error {
 	constructor(
@@ -67,7 +65,7 @@ export interface BrokerOptions {
 	dashboardUrl: string;
 	version: string;
 	getDbSizeByte: () => number;
-	issueClient: IssueClient | null;
+	issueRepo: string | null;
 	// 테스트에서 monotonic timestamp 주입 hook. production 은 default 사용.
 	clock?: () => string;
 	// 테스트에서 uptime 고정용. production 은 Date.now() 기본.
@@ -92,7 +90,7 @@ export interface Broker {
 	topicDetail: (req: TopicDetailRequest) => TopicDetailResponse;
 	topicMonitor: (req: TopicMonitorRequest) => TopicMonitorResponse;
 	diagnostics: () => DiagnosticsResponse;
-	issueCreate: (req: IssueCreateRequest) => Promise<IssueCreateResponse>;
+	serverInfo: () => ServerInfoResponse;
 	channelBroadcast: (req: ChannelBroadcastRequest) => ChannelBroadcastResponse;
 	channelDelete: (req: ChannelDeleteRequest) => ChannelDeleteResponse;
 	peerDelete: (req: PeerDeleteRequest) => PeerDeleteResponse;
@@ -155,23 +153,6 @@ export function createBroker(db: CcDatabase, opts: BrokerOptions): Broker {
 			const start = nowMs();
 			try {
 				const result = fn(...args);
-				recordRpc(method, start, undefined);
-				return result;
-			} catch (e) {
-				recordRpc(method, start, e);
-				throw e;
-			}
-		};
-	}
-
-	function instrumentAsync<Args extends unknown[], R>(
-		method: string,
-		fn: (...args: Args) => Promise<R>,
-	): (...args: Args) => Promise<R> {
-		return async (...args: Args): Promise<R> => {
-			const start = nowMs();
-			try {
-				const result = await fn(...args);
 				recordRpc(method, start, undefined);
 				return result;
 			} catch (e) {
@@ -639,24 +620,8 @@ export function createBroker(db: CcDatabase, opts: BrokerOptions): Broker {
 		};
 	}
 
-	async function issueCreate(
-		req: IssueCreateRequest,
-	): Promise<IssueCreateResponse> {
-		if (!opts.issueClient) {
-			throw new BrokerError(
-				"ISSUE_REPO_NOT_CONFIGURED",
-				"issueRepo is not configured in ~/.cc-messagebus/config.json",
-			);
-		}
-		try {
-			const result = await opts.issueClient.create(req);
-			return { issueNumber: result.issueNumber, url: result.url };
-		} catch (e) {
-			if (e instanceof IssueClientError) {
-				throw new BrokerError("ISSUE_CLIENT_FAILED", e.message, e.details);
-			}
-			throw e;
-		}
+	function serverInfo(): ServerInfoResponse {
+		return { issueRepo: opts.issueRepo, version: opts.version };
 	}
 
 	// 운영자 broadcast: operator 처럼 사용자가 입력한 from identity 로 topic 에 발행.
@@ -793,7 +758,7 @@ export function createBroker(db: CcDatabase, opts: BrokerOptions): Broker {
 		topicMonitor: instrument("topicMonitor", topicMonitor),
 		// diagnostics 자체는 ring 기록 제외 — snapshot 호출이 자기 자신을 오염시키는 노이즈 방지.
 		diagnostics,
-		issueCreate: instrumentAsync("issueCreate", issueCreate),
+		serverInfo,
 		channelBroadcast: instrument("channelBroadcast", channelBroadcast),
 		channelDelete: instrument("channelDelete", channelDelete),
 		peerDelete: instrument("peerDelete", peerDelete),
