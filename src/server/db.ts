@@ -34,7 +34,8 @@ CREATE TABLE IF NOT EXISTS sessions (
 	connected_at TEXT NOT NULL,
 	last_seen_at TEXT NOT NULL,
 	status TEXT NOT NULL,
-	last_activity_at TEXT
+	last_activity_at TEXT,
+	pid INTEGER
 );
 
 CREATE TABLE IF NOT EXISTS topics (
@@ -111,6 +112,10 @@ const MIGRATE_V3_TO_V4_SQL = `
 ALTER TABLE topic_subscriptions ADD COLUMN last_seen_message_id TEXT REFERENCES topic_messages(id) ON DELETE SET NULL;
 `;
 
+const MIGRATE_V4_TO_V5_SQL = `
+ALTER TABLE sessions ADD COLUMN pid INTEGER;
+`;
+
 // SQLite cannot ALTER an existing FK clause. v3 rebuilds messages so that
 // topic_message_id cascades on topic_messages delete (was SET NULL in v2).
 const MIGRATE_V2_TO_V3_SQL = `
@@ -141,6 +146,7 @@ interface SessionRow {
 	last_seen_at: string;
 	status: string;
 	last_activity_at: string | null;
+	pid: number | null;
 }
 
 interface MessageRow {
@@ -203,6 +209,7 @@ function rowToPeer(row: SessionRow, queueLength: number): PeerDto {
 		lastSeenAt: row.last_seen_at,
 		lastActivityAt: row.last_activity_at,
 		queueLength,
+		pid: row.pid,
 	};
 }
 
@@ -268,6 +275,19 @@ function migrateV3ToV4(db: Database.Database): void {
 	}
 }
 
+function migrateV4ToV5(db: Database.Database): void {
+	db.pragma("foreign_keys = OFF");
+	try {
+		const tx = db.transaction(() => {
+			db.exec(MIGRATE_V4_TO_V5_SQL);
+			db.pragma("user_version = 5");
+		});
+		tx();
+	} finally {
+		db.pragma("foreign_keys = ON");
+	}
+}
+
 export function openDatabase(dbPath: string) {
 	mkdirSync(dirname(dbPath), { recursive: true });
 	const db = new Database(dbPath);
@@ -288,7 +308,7 @@ export function openDatabase(dbPath: string) {
 	db.exec(SCHEMA_DDL);
 
 	if (isFreshDb) {
-		db.pragma("user_version = 4");
+		db.pragma("user_version = 5");
 	}
 
 	let userVersion = db.pragma("user_version", { simple: true }) as number;
@@ -304,15 +324,29 @@ export function openDatabase(dbPath: string) {
 		migrateV3ToV4(db);
 		userVersion = 4;
 	}
+	if (userVersion === 4) {
+		migrateV4ToV5(db);
+		userVersion = 5;
+	}
 
 	const stmtGetSession = db.prepare<[string], SessionRow>(
 		"SELECT * FROM sessions WHERE peer_id = ?",
 	);
-	const stmtInsertSession = db.prepare<[string, string, string, string]>(
-		"INSERT INTO sessions (peer_id, connected_at, last_seen_at, status) VALUES (?, ?, ?, ?)",
+	const stmtInsertSession = db.prepare<
+		[string, string, string, string, number | null]
+	>(
+		"INSERT INTO sessions (peer_id, connected_at, last_seen_at, status, pid) VALUES (?, ?, ?, ?, ?)",
 	);
-	const stmtReactivateSession = db.prepare<[string, string, string, string]>(
-		"UPDATE sessions SET status = ?, connected_at = ?, last_seen_at = ? WHERE peer_id = ?",
+	const stmtReactivateSession = db.prepare<
+		[string, string, string, number | null, string]
+	>(
+		"UPDATE sessions SET status = ?, connected_at = ?, last_seen_at = ?, pid = ? WHERE peer_id = ?",
+	);
+	const stmtListConnectedWithPid = db.prepare<
+		[],
+		{ peer_id: string; pid: number | null }
+	>(
+		`SELECT peer_id, pid FROM sessions WHERE status = '${SessionStatus.CONNECTED}'`,
 	);
 	const stmtDeleteSession = db.prepare<[string]>(
 		"DELETE FROM sessions WHERE peer_id = ?",
@@ -534,15 +568,19 @@ export function openDatabase(dbPath: string) {
 		"DELETE FROM messages WHERE to_peer = ?",
 	);
 
-	function registerSession(peerId: PeerId, now: IsoTimestamp): PeerDto {
+	function registerSession(
+		peerId: PeerId,
+		now: IsoTimestamp,
+		pid: number | null = null,
+	): PeerDto {
 		const existing = stmtGetSession.get(peerId);
 		if (existing) {
 			if (existing.status === SessionStatus.CONNECTED) {
 				throw new DbError("PEER_ALREADY_REGISTERED");
 			}
-			stmtReactivateSession.run(SessionStatus.CONNECTED, now, now, peerId);
+			stmtReactivateSession.run(SessionStatus.CONNECTED, now, now, pid, peerId);
 		} else {
-			stmtInsertSession.run(peerId, now, now, SessionStatus.CONNECTED);
+			stmtInsertSession.run(peerId, now, now, SessionStatus.CONNECTED, pid);
 		}
 		return {
 			peerId,
@@ -551,7 +589,18 @@ export function openDatabase(dbPath: string) {
 			lastSeenAt: now,
 			lastActivityAt: null,
 			queueLength: stmtCountQueue.get(peerId)?.c ?? 0,
+			pid,
 		};
+	}
+
+	function listConnectedWithPid(): Array<{
+		peerId: PeerId;
+		pid: number | null;
+	}> {
+		return stmtListConnectedWithPid.all().map((r) => ({
+			peerId: r.peer_id,
+			pid: r.pid,
+		}));
 	}
 
 	const unregisterTx = db.transaction(
@@ -835,6 +884,7 @@ export function openDatabase(dbPath: string) {
 		inspectLastActivityAt,
 		getSession,
 		listSessions,
+		listConnectedWithPid,
 		insertMessage,
 		fetchDeliverable: (
 			peerId: PeerId,

@@ -63,8 +63,16 @@ const TOPIC_ID_SCHEMA = { type: "string", minLength: 1, maxLength: 64 };
 
 const REGISTER_BODY = {
 	type: "object",
-	properties: { peerId: PEER_ID_SCHEMA },
+	properties: {
+		peerId: PEER_ID_SCHEMA,
+		pid: { type: "integer", minimum: 1 },
+	},
 	required: ["peerId"],
+	additionalProperties: false,
+};
+const PEERS_CLEAN_BODY = {
+	type: "object",
+	properties: {},
 	additionalProperties: false,
 };
 const UNREGISTER_BODY = {
@@ -380,6 +388,12 @@ export function createServer(opts: ServerOptions): Server {
 		HTTP_ENDPOINTS.peerDelete.path,
 		{ schema: { body: PEER_DELETE_BODY } },
 		async (req) => ({ ok: true, ...broker.peerDelete(req.body) }),
+	);
+
+	app.post(
+		HTTP_ENDPOINTS.peersClean.path,
+		{ schema: { body: PEERS_CLEAN_BODY } },
+		async () => ({ ok: true, ...broker.peersClean() }),
 	);
 
 	app.get("/dashboard", async (_req, reply) => {

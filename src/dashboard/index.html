@@ -111,6 +111,29 @@
 			.tree-section {
 				margin-top: 14px;
 			}
+			.tree-section-head {
+				display: flex;
+				justify-content: space-between;
+				align-items: center;
+				gap: 8px;
+			}
+			.head-action {
+				font-size: 11px;
+				padding: 3px 8px;
+				border-radius: 4px;
+				border: 1px solid var(--border);
+				background: transparent;
+				color: var(--muted);
+				cursor: pointer;
+			}
+			.head-action:hover {
+				background: rgba(88, 166, 255, 0.08);
+				color: var(--text);
+			}
+			.head-action:disabled {
+				opacity: 0.5;
+				cursor: not-allowed;
+			}
 			.tree-list {
 				list-style: none;
 				margin: 0;
@@ -766,7 +789,15 @@
 					</ul>
 				</div>
 				<div class="tree-section">
-					<h2>Peers <span id="peers-count">(0)</span></h2>
+					<h2 class="tree-section-head">
+						<span>Peers <span id="peers-count">(0)</span></span>
+						<button
+							type="button"
+							id="peers-clean"
+							class="head-action"
+							title="Remove peers whose process is gone"
+						>🧹 Clean</button>
+					</h2>
 					<ul id="peers" class="tree-list">
 						<li class="empty">(no peers)</li>
 					</ul>
@@ -2115,6 +2146,23 @@
 				} finally {
 					issueSubmitBtn.disabled = false;
 				}
+			});
+
+			const peersCleanBtn = document.getElementById("peers-clean");
+			peersCleanBtn.addEventListener("click", () => {
+				openConfirmModal({
+					title: "Clean dead peers",
+					body: "Remove peers whose registered process is no longer running. This deletes their queue and subscriptions.",
+					onConfirm: async () => {
+						const res = await postJson("/api/peers_clean", {});
+						const n = res.cleaned?.length ?? 0;
+						peersCleanBtn.textContent =
+							n === 0 ? "🧹 (none)" : `🧹 ${n} cleaned`;
+						setTimeout(() => {
+							peersCleanBtn.textContent = "🧹 Clean";
+						}, 2000);
+					},
+				});
 			});
 
 			renderFlowHeader();

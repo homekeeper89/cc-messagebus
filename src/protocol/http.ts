@@ -33,6 +33,7 @@ export interface PeerDto {
 	lastSeenAt: IsoTimestamp;
 	lastActivityAt: IsoTimestamp | null;
 	queueLength: number;
+	pid: number | null;
 }
 
 export interface TopicDto {
@@ -93,10 +94,12 @@ export const HTTP_ENDPOINTS = {
 	channelBroadcast: { method: "POST", path: "/api/channel_broadcast" },
 	channelDelete: { method: "POST", path: "/api/channel_delete" },
 	peerDelete: { method: "POST", path: "/api/peer_delete" },
+	peersClean: { method: "POST", path: "/api/peers_clean" },
 } as const;
 
 export interface RegisterRequest {
 	peerId: PeerId;
+	pid?: number;
 }
 export interface RegisterResponse {
 	peerId: PeerId;
@@ -271,6 +274,15 @@ export interface PeerDeleteResponse {
 	cancelledInflight: number;
 }
 
+export interface CleanedPeerDto {
+	peerId: PeerId;
+	pid: number;
+}
+export type PeersCleanRequest = Record<string, never>;
+export interface PeersCleanResponse {
+	cleaned: CleanedPeerDto[];
+}
+
 export type RegisterApiResponse = ApiResponse<RegisterResponse>;
 export type UnregisterApiResponse = ApiResponse<UnregisterResponse>;
 export type SendApiResponse = ApiResponse<SendResponse>;
@@ -290,3 +302,4 @@ export type ServerInfoApiResponse = ApiResponse<ServerInfoResponse>;
 export type ChannelBroadcastApiResponse = ApiResponse<ChannelBroadcastResponse>;
 export type ChannelDeleteApiResponse = ApiResponse<ChannelDeleteResponse>;
 export type PeerDeleteApiResponse = ApiResponse<PeerDeleteResponse>;
+export type PeersCleanApiResponse = ApiResponse<PeersCleanResponse>;

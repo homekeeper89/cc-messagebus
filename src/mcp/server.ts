@@ -65,7 +65,7 @@ export async function dispatch(
 		case MCP_TOOL_NAMES.register: {
 			await ensureBrokerRunning(client, spawnCmd);
 			const peerId = args.peerId as string;
-			const res = await client.register({ peerId });
+			const res = await client.register({ peerId, pid: process.pid });
 			setPeerId(peerId);
 			return res;
 		}
@@ -166,7 +166,9 @@ export async function runMcp(opts: RunMcpOptions = {}): Promise<void> {
 		// best-effort: dashboard 즉시 동작이 안 되더라도 MCP server는 계속 살아 있음.
 		// 첫 register 호출 시 dispatch에서 다시 시도한다.
 		const message = e instanceof Error ? e.message : String(e);
-		process.stderr.write(`[cc-messagebus] broker auto-spawn failed: ${message}\n`);
+		process.stderr.write(
+			`[cc-messagebus] broker auto-spawn failed: ${message}\n`,
+		);
 	}
 
 	const server = new Server(
