@@ -1491,6 +1491,7 @@
 						li.append(time, from, subj, body, debugBtn, issueBtn, debug);
 						li.addEventListener("click", (e) => {
 							if (e.target.closest(".debug-toggle")) return;
+							if (window.getSelection()?.toString()) return;
 							li.dataset.open = li.dataset.open === "1" ? "0" : "1";
 						});
 						return li;
