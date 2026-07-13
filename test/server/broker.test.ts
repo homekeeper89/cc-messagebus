@@ -702,5 +702,20 @@ describe("broker", () => {
 
 			assert.equal(res.cleaned.length, 0);
 		});
+
+		test("removes disconnected peers regardless of pid", () => {
+			broker.register({ peerId: "gone", pid: process.pid });
+			broker.disconnect("gone");
+			broker.register({ peerId: "gone-nopid" });
+			broker.disconnect("gone-nopid");
+
+			const res = broker.peersClean();
+
+			const cleanedIds = res.cleaned.map((c) => c.peerId).sort();
+			assert.deepEqual(cleanedIds, ["gone", "gone-nopid"]);
+			const peers = broker.listPeers().peers.map((p) => p.peerId);
+			assert.ok(!peers.includes("gone"));
+			assert.ok(!peers.includes("gone-nopid"));
+		});
 	});
 });
