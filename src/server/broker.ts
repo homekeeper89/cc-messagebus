@@ -16,6 +16,7 @@ import type {
 	PeerDeleteRequest,
 	PeerDeleteResponse,
 	PeerId,
+	PeersCleanResponse,
 	ReadRequest,
 	ReadResponse,
 	RecentErrorEntry,
@@ -94,6 +95,7 @@ export interface Broker {
 	channelBroadcast: (req: ChannelBroadcastRequest) => ChannelBroadcastResponse;
 	channelDelete: (req: ChannelDeleteRequest) => ChannelDeleteResponse;
 	peerDelete: (req: PeerDeleteRequest) => PeerDeleteResponse;
+	peersClean: () => PeersCleanResponse;
 }
 
 const HISTORY_LIMIT_DEFAULT = 50;
@@ -180,7 +182,7 @@ export function createBroker(db: CcDatabase, opts: BrokerOptions): Broker {
 		const now = nowIso();
 		let peer: ReturnType<typeof db.registerSession>;
 		try {
-			peer = db.registerSession(req.peerId, now);
+			peer = db.registerSession(req.peerId, now, req.pid ?? null);
 		} catch (e) {
 			if (e instanceof DbError && e.code === "PEER_ALREADY_REGISTERED") {
 				throw new BrokerError(
@@ -718,6 +720,38 @@ export function createBroker(db: CcDatabase, opts: BrokerOptions): Broker {
 		return stats;
 	}
 
+	function isProcessAlive(pid: number): boolean {
+		try {
+			process.kill(pid, 0);
+			return true;
+		} catch (e) {
+			const code = (e as NodeJS.ErrnoException).code;
+			// ESRCH = 프로세스 없음 (진짜 죽음). EPERM = 있지만 signal 권한 없음 (살아있음).
+			if (code === "ESRCH") return false;
+			return true;
+		}
+	}
+
+	function peersClean(): PeersCleanResponse {
+		const rows = db.listConnectedWithPid();
+		const cleaned: { peerId: PeerId; pid: number }[] = [];
+		for (const row of rows) {
+			if (row.pid == null) continue;
+			if (isProcessAlive(row.pid)) continue;
+			try {
+				db.deletePeer(row.peerId);
+			} catch {
+				continue;
+			}
+			cleaned.push({ peerId: row.peerId, pid: row.pid });
+		}
+		const now = nowIso();
+		for (const c of cleaned) {
+			emit({ type: "session_disconnected", peerId: c.peerId, at: now });
+		}
+		return { cleaned };
+	}
+
 	function peerDelete(req: PeerDeleteRequest): PeerDeleteResponse {
 		const existing = db.getSession(req.peerId);
 		if (!existing) {
@@ -762,5 +796,6 @@ export function createBroker(db: CcDatabase, opts: BrokerOptions): Broker {
 		channelBroadcast: instrument("channelBroadcast", channelBroadcast),
 		channelDelete: instrument("channelDelete", channelDelete),
 		peerDelete: instrument("peerDelete", peerDelete),
+		peersClean: instrument("peersClean", peersClean),
 	};
 }

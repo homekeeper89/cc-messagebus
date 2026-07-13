@@ -657,4 +657,50 @@ describe("broker", () => {
 			assert.equal(bob.queueDepth, 0);
 		});
 	});
+
+	describe("peersClean", () => {
+		test("removes peers whose pid is dead (ESRCH)", () => {
+			broker.register({ peerId: "alive", pid: process.pid });
+			broker.register({ peerId: "dead", pid: 999999 });
+
+			const res = broker.peersClean();
+
+			assert.equal(res.cleaned.length, 1);
+			assert.equal(res.cleaned[0].peerId, "dead");
+			assert.equal(res.cleaned[0].pid, 999999);
+			const peers = broker.listPeers().peers.map((p) => p.peerId);
+			assert.ok(peers.includes("alive"));
+			assert.ok(!peers.includes("dead"));
+		});
+
+		test("keeps peers with null pid (never registered pid)", () => {
+			broker.register({ peerId: "nopid" });
+
+			const res = broker.peersClean();
+
+			assert.equal(res.cleaned.length, 0);
+			const peers = broker.listPeers().peers.map((p) => p.peerId);
+			assert.ok(peers.includes("nopid"));
+		});
+
+		test("emits session_disconnected for cleaned peers", () => {
+			broker.register({ peerId: "dead", pid: 999999 });
+			const events: string[] = [];
+			broker.events.on("session_disconnected", (e) => {
+				events.push((e as { peerId: string }).peerId);
+			});
+
+			broker.peersClean();
+
+			assert.deepEqual(events, ["dead"]);
+		});
+
+		test("returns empty when no peers are dead", () => {
+			broker.register({ peerId: "alive", pid: process.pid });
+
+			const res = broker.peersClean();
+
+			assert.equal(res.cleaned.length, 0);
+		});
+	});
 });
