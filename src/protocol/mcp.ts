@@ -7,6 +7,8 @@ import type {
 	PeerId,
 	ReadResponse,
 	RegisterResponse,
+	SendResponse,
+	ThreadId,
 	TopicCreateResponse,
 	TopicDetailResponse,
 	TopicHistoryResponse,
@@ -18,12 +20,10 @@ import type {
 	UnregisterResponse,
 } from "./http.js";
 
-// NOTE: `send` (1:1 DM) tool 은 0.3.0 PR-D 부터 MCP 노출에서 제외.
-// agent 가 1:1 DM 으로 보내는 문제 차단이 목적. HTTP /send RPC,
-// read/ack inbox 인프라는 유지 (topic delivery 가 의존하고 운영자/디버깅용).
 export const MCP_TOOL_NAMES = {
 	register: "register",
 	unregister: "unregister",
+	send: "send",
 	read: "read",
 	ack: "ack",
 	listPeers: "list_peers",
@@ -52,6 +52,14 @@ export interface UnregisterToolInput {
 	purgeQueue?: boolean;
 }
 export type UnregisterToolOutput = UnregisterResponse;
+
+export interface SendToolInput {
+	to: PeerId;
+	subject: string;
+	body: string;
+	threadId?: ThreadId;
+}
+export type SendToolOutput = SendResponse;
 
 export interface ReadToolInput {
 	max?: number;
@@ -120,6 +128,7 @@ export const MCP_TOOL_DESCRIPTIONS: Record<McpToolKey, string> = {
 		"Register this Claude session under a peerId on the cc-messagebus broker. After register succeeds, you MUST invoke the Monitor tool with the returned `monitorCommand` so that incoming messages are delivered to this session.",
 	unregister:
 		"Unregister the current session from the broker. By default the message queue is preserved; pass purgeQueue=true to delete it.",
+	send: "Send a 1:1 direct message to another peer. The message enters the target peer's inbox and is delivered via their read/ack flow. Returns the messageId and sentAt timestamp. Use this when you need to reach a specific peer directly without going through a topic.",
 	read: "Fetch unacked messages for this session. Each returned message enters in-flight state and must be ack-ed within the visibility timeout (default 30s) or it will be redelivered.",
 	ack: "Acknowledge a previously read message by id. Until ack, the message stays in-flight and may be redelivered.",
 	listPeers: "List all registered peers and their connection status.",
@@ -159,6 +168,17 @@ export const MCP_INPUT_SCHEMAS: Record<McpToolKey, JsonSchema> = {
 	unregister: {
 		type: "object",
 		properties: { purgeQueue: { type: "boolean" } },
+		additionalProperties: false,
+	},
+	send: {
+		type: "object",
+		properties: {
+			to: PEER_ID_SCHEMA,
+			subject: SUBJECT_SCHEMA,
+			body: BODY_SCHEMA,
+			threadId: { type: "string", minLength: 1, maxLength: 64 },
+		},
+		required: ["to", "subject", "body"],
 		additionalProperties: false,
 	},
 	read: {

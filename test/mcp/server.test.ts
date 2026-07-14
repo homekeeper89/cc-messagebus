@@ -17,7 +17,13 @@ import {
 interface CallLog {
 	register: { peerId: string }[];
 	unregister: { peerId: string; purgeQueue?: boolean }[];
-	send: { from: string; to: string; subject: string; body: string }[];
+	send: {
+		from: string;
+		to: string;
+		subject: string;
+		body: string;
+		threadId?: string;
+	}[];
 	read: { peerId: string; max?: number }[];
 	ack: { peerId: string; messageId: string }[];
 	listPeers: number;
@@ -142,7 +148,7 @@ const noopSpawn: SpawnCmd = { exe: "/bin/true", args: [] };
 describe("mcp/server.buildToolList", () => {
 	it("returns all tools matching protocol/mcp.ts", () => {
 		const tools = buildToolList();
-		assert.equal(tools.length, 13);
+		assert.equal(tools.length, 14);
 		const keys = Object.keys(MCP_TOOL_NAMES) as McpToolKey[];
 		for (const key of keys) {
 			const found = tools.find((t) => t.name === MCP_TOOL_NAMES[key]);
@@ -152,13 +158,10 @@ describe("mcp/server.buildToolList", () => {
 		}
 	});
 
-	it("does not expose `send` (DM) tool (PR-D)", () => {
+	it("exposes `send` (DM) tool", () => {
 		const tools = buildToolList();
-		assert.equal(
-			tools.find((t) => t.name === "send"),
-			undefined,
-			"send tool must be removed from MCP surface",
-		);
+		const send = tools.find((t) => t.name === "send");
+		assert.ok(send, "send tool must be exposed on MCP surface");
 	});
 });
 
@@ -179,9 +182,26 @@ describe("mcp/server.dispatch", () => {
 		assert.equal(peekPeerId(), "alice");
 	});
 
-	it("dispatch('send', ...) throws UNKNOWN_TOOL (PR-D)", async () => {
+	it("dispatch('send', ...) injects from and forwards args to client.send", async () => {
 		const { client, calls } = makeMockClient();
 		await dispatch(client, noopSpawn, "register", { peerId: "alice" });
+		await dispatch(client, noopSpawn, "send", {
+			to: "bob",
+			subject: "hi",
+			body: "hello",
+		});
+		assert.equal(calls.send.length, 1);
+		assert.deepEqual(calls.send[0], {
+			from: "alice",
+			to: "bob",
+			subject: "hi",
+			body: "hello",
+			threadId: undefined,
+		});
+	});
+
+	it("dispatch('send', ...) before register throws PEER_NOT_REGISTERED", async () => {
+		const { client } = makeMockClient();
 		await assert.rejects(
 			() =>
 				dispatch(client, noopSpawn, "send", {
@@ -189,12 +209,8 @@ describe("mcp/server.dispatch", () => {
 					subject: "hi",
 					body: "hello",
 				}),
-			(e: unknown) => e instanceof McpClientError && e.code === "UNKNOWN_TOOL",
-		);
-		assert.equal(
-			calls.send.length,
-			0,
-			"BrokerClient.send must not be invoked when send tool is dispatched",
+			(e: unknown) =>
+				e instanceof McpClientError && e.code === "PEER_NOT_REGISTERED",
 		);
 	});
 
