@@ -348,6 +348,10 @@ export function openDatabase(dbPath: string) {
 	>(
 		`SELECT peer_id, pid FROM sessions WHERE status = '${SessionStatus.CONNECTED}'`,
 	);
+	const stmtListSessionsWithPid = db.prepare<
+		[],
+		{ peer_id: string; pid: number | null; status: string }
+	>("SELECT peer_id, pid, status FROM sessions");
 	const stmtDeleteSession = db.prepare<[string]>(
 		"DELETE FROM sessions WHERE peer_id = ?",
 	);
@@ -600,6 +604,18 @@ export function openDatabase(dbPath: string) {
 		return stmtListConnectedWithPid.all().map((r) => ({
 			peerId: r.peer_id,
 			pid: r.pid,
+		}));
+	}
+
+	function listSessionsWithPid(): Array<{
+		peerId: PeerId;
+		pid: number | null;
+		status: SessionStatus;
+	}> {
+		return stmtListSessionsWithPid.all().map((r) => ({
+			peerId: r.peer_id,
+			pid: r.pid,
+			status: r.status as SessionStatus,
 		}));
 	}
 
@@ -885,6 +901,7 @@ export function openDatabase(dbPath: string) {
 		getSession,
 		listSessions,
 		listConnectedWithPid,
+		listSessionsWithPid,
 		insertMessage,
 		fetchDeliverable: (
 			peerId: PeerId,

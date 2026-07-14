@@ -46,6 +46,7 @@ import type {
 	UnregisterRequest,
 	UnregisterResponse,
 } from "../protocol/http.js";
+import { SessionStatus } from "../protocol/http.js";
 import type { DashboardEvent } from "../protocol/sse.js";
 import { type CcDatabase, DbError } from "./db.js";
 
@@ -733,17 +734,19 @@ export function createBroker(db: CcDatabase, opts: BrokerOptions): Broker {
 	}
 
 	function peersClean(): PeersCleanResponse {
-		const rows = db.listConnectedWithPid();
+		const rows = db.listSessionsWithPid();
 		const cleaned: { peerId: PeerId; pid: number }[] = [];
 		for (const row of rows) {
-			if (row.pid == null) continue;
-			if (isProcessAlive(row.pid)) continue;
+			if (row.status === SessionStatus.CONNECTED) {
+				if (row.pid == null) continue;
+				if (isProcessAlive(row.pid)) continue;
+			}
 			try {
 				db.deletePeer(row.peerId);
 			} catch {
 				continue;
 			}
-			cleaned.push({ peerId: row.peerId, pid: row.pid });
+			cleaned.push({ peerId: row.peerId, pid: row.pid ?? 0 });
 		}
 		const now = nowIso();
 		for (const c of cleaned) {
