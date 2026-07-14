@@ -78,6 +78,16 @@ export async function dispatch(
 			clearPeerId();
 			return res;
 		}
+		case MCP_TOOL_NAMES.send: {
+			const from = requirePeerId();
+			return client.send({
+				from,
+				to: args.to as string,
+				subject: args.subject as string,
+				body: args.body as string,
+				threadId: args.threadId as string | undefined,
+			});
+		}
 		case MCP_TOOL_NAMES.read: {
 			const peerId = requirePeerId();
 			return client.read({
