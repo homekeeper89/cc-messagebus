@@ -718,4 +718,97 @@ describe("broker", () => {
 			assert.ok(!peers.includes("gone-nopid"));
 		});
 	});
+
+	describe("listDmConversations", () => {
+		test("returns empty when no DMs sent", () => {
+			assert.deepEqual(broker.listDmConversations(), { conversations: [] });
+		});
+
+		test("groups messages by unordered peer pair", () => {
+			let tick = 0;
+			const clockedBroker = createBroker(db, {
+				visibilityTimeoutSec: 30,
+				ttlDays: 30,
+				dashboardUrl: "http://localhost:5959",
+				clock: () => new Date(2026, 0, 1, 0, 0, tick++).toISOString(),
+			});
+			clockedBroker.register({ peerId: "alice" });
+			clockedBroker.register({ peerId: "bob" });
+			clockedBroker.register({ peerId: "carol" });
+
+			clockedBroker.send({
+				from: "alice",
+				to: "bob",
+				subject: "hi",
+				body: "1",
+			});
+			clockedBroker.send({
+				from: "bob",
+				to: "alice",
+				subject: "re",
+				body: "2",
+			});
+			clockedBroker.send({
+				from: "alice",
+				to: "carol",
+				subject: "yo",
+				body: "3",
+			});
+
+			const { conversations } = clockedBroker.listDmConversations();
+			assert.equal(conversations.length, 2);
+			const abPair = conversations.find(
+				(c) => c.peerA === "alice" && c.peerB === "bob",
+			);
+			assert.ok(abPair, "alice↔bob pair present");
+			assert.equal(abPair?.messageCount, 2);
+			assert.equal(abPair?.lastFrom, "bob");
+			assert.equal(abPair?.lastSubject, "re");
+		});
+
+		test("orders conversations by lastSentAt DESC", () => {
+			let tick = 0;
+			const clockedBroker = createBroker(db, {
+				visibilityTimeoutSec: 30,
+				ttlDays: 30,
+				dashboardUrl: "http://localhost:5959",
+				clock: () => new Date(2026, 0, 1, 0, 0, tick++).toISOString(),
+			});
+			clockedBroker.register({ peerId: "alice" });
+			clockedBroker.register({ peerId: "bob" });
+			clockedBroker.register({ peerId: "carol" });
+
+			clockedBroker.send({
+				from: "alice",
+				to: "bob",
+				subject: "old",
+				body: "",
+			});
+			clockedBroker.send({
+				from: "alice",
+				to: "carol",
+				subject: "new",
+				body: "",
+			});
+
+			const { conversations } = clockedBroker.listDmConversations();
+			assert.equal(conversations[0]?.lastSubject, "new");
+			assert.equal(conversations[1]?.lastSubject, "old");
+		});
+
+		test("excludes topic fanout messages", () => {
+			broker.register({ peerId: "alice" });
+			broker.register({ peerId: "bob" });
+			broker.topicCreate({ topicId: "t1", createdBy: "alice" });
+			broker.topicSubscribe({ topicId: "t1", peerId: "bob" });
+			broker.topicSend({
+				topicId: "t1",
+				from: "alice",
+				subject: "topicmsg",
+				body: "",
+			});
+
+			assert.deepEqual(broker.listDmConversations(), { conversations: [] });
+		});
+	});
 });

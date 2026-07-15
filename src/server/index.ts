@@ -124,6 +124,11 @@ const LIST_TOPICS_BODY = {
 	properties: {},
 	additionalProperties: false,
 };
+const LIST_DM_CONVERSATIONS_BODY = {
+	type: "object",
+	properties: {},
+	additionalProperties: false,
+};
 const TOPIC_CREATE_BODY = {
 	type: "object",
 	properties: {
@@ -317,6 +322,12 @@ export function createServer(opts: ServerOptions): Server {
 		HTTP_ENDPOINTS.listTopics.path,
 		{ schema: { body: LIST_TOPICS_BODY } },
 		async () => ({ ok: true, ...broker.listTopics() }),
+	);
+
+	app.post(
+		HTTP_ENDPOINTS.listDmConversations.path,
+		{ schema: { body: LIST_DM_CONVERSATIONS_BODY } },
+		async () => ({ ok: true, ...broker.listDmConversations() }),
 	);
 
 	app.post<{ Body: TopicCreateRequest }>(

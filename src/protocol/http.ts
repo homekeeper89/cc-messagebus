@@ -74,6 +74,16 @@ export interface TopicMessageDto {
 	expiresAt: IsoTimestamp;
 }
 
+export interface DmConversationDto {
+	peerA: PeerId;
+	peerB: PeerId;
+	lastFrom: PeerId;
+	lastTo: PeerId;
+	lastSubject: string;
+	lastSentAt: IsoTimestamp;
+	messageCount: number;
+}
+
 export const HTTP_ENDPOINTS = {
 	register: { method: "POST", path: "/api/register" },
 	unregister: { method: "POST", path: "/api/unregister" },
@@ -82,6 +92,10 @@ export const HTTP_ENDPOINTS = {
 	ack: { method: "POST", path: "/api/ack" },
 	listPeers: { method: "POST", path: "/api/list_peers" },
 	listTopics: { method: "POST", path: "/api/list_topics" },
+	listDmConversations: {
+		method: "POST",
+		path: "/api/list_dm_conversations",
+	},
 	topicCreate: { method: "POST", path: "/api/topic_create" },
 	topicSubscribe: { method: "POST", path: "/api/topic_subscribe" },
 	topicSend: { method: "POST", path: "/api/topic_send" },
@@ -151,6 +165,11 @@ export interface ListPeersResponse {
 export type ListTopicsRequest = Record<string, never>;
 export interface ListTopicsResponse {
 	topics: TopicSummaryDto[];
+}
+
+export type ListDmConversationsRequest = Record<string, never>;
+export interface ListDmConversationsResponse {
+	conversations: DmConversationDto[];
 }
 
 export interface TopicCreateRequest {
@@ -290,6 +309,8 @@ export type ReadApiResponse = ApiResponse<ReadResponse>;
 export type AckApiResponse = ApiResponse<AckResponse>;
 export type ListPeersApiResponse = ApiResponse<ListPeersResponse>;
 export type ListTopicsApiResponse = ApiResponse<ListTopicsResponse>;
+export type ListDmConversationsApiResponse =
+	ApiResponse<ListDmConversationsResponse>;
 export type TopicCreateApiResponse = ApiResponse<TopicCreateResponse>;
 export type TopicSubscribeApiResponse = ApiResponse<TopicSubscribeResponse>;
 export type TopicSendApiResponse = ApiResponse<TopicSendResponse>;

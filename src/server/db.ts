@@ -2,6 +2,7 @@ import { mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 import Database from "better-sqlite3";
 import type {
+	DmConversationDto,
 	IsoTimestamp,
 	MessageDto,
 	MessageId,
@@ -510,6 +511,50 @@ export function openDatabase(dbPath: string) {
 		 GROUP BY t.id
 		 ORDER BY MAX(tm.sent_at) DESC NULLS LAST, t.created_at ASC`,
 	);
+	const stmtListDmConversations = db.prepare<
+		[],
+		{
+			peer_a: string;
+			peer_b: string;
+			last_from: string;
+			last_to: string;
+			last_subject: string;
+			last_sent_at: string;
+			message_count: number;
+		}
+	>(
+		`WITH dm AS (
+		    SELECT
+		        CASE WHEN from_peer < to_peer THEN from_peer ELSE to_peer END AS peer_a,
+		        CASE WHEN from_peer < to_peer THEN to_peer ELSE from_peer END AS peer_b,
+		        from_peer,
+		        to_peer,
+		        subject,
+		        sent_at,
+		        id
+		      FROM messages
+		     WHERE topic_message_id IS NULL
+		 ),
+		 latest AS (
+		    SELECT peer_a, peer_b, MAX(sent_at) AS last_sent_at, COUNT(*) AS message_count
+		      FROM dm
+		     GROUP BY peer_a, peer_b
+		 )
+		 SELECT
+		    l.peer_a AS peer_a,
+		    l.peer_b AS peer_b,
+		    dm.from_peer AS last_from,
+		    dm.to_peer   AS last_to,
+		    dm.subject   AS last_subject,
+		    l.last_sent_at AS last_sent_at,
+		    l.message_count AS message_count
+		   FROM latest l
+		   JOIN dm ON dm.peer_a = l.peer_a
+		         AND dm.peer_b = l.peer_b
+		         AND dm.sent_at = l.last_sent_at
+		  GROUP BY l.peer_a, l.peer_b
+		  ORDER BY l.last_sent_at DESC`,
+	);
 	const stmtListTopicSubscribersWithStats = db.prepare<
 		[string],
 		{
@@ -793,6 +838,19 @@ export function openDatabase(dbPath: string) {
 		}));
 	}
 
+	function listDmConversations(): DmConversationDto[] {
+		const rows = stmtListDmConversations.all();
+		return rows.map((r) => ({
+			peerA: r.peer_a,
+			peerB: r.peer_b,
+			lastFrom: r.last_from,
+			lastTo: r.last_to,
+			lastSubject: r.last_subject,
+			lastSentAt: r.last_sent_at,
+			messageCount: r.message_count,
+		}));
+	}
+
 	const topicSendTx = db.transaction(
 		(input: TopicSendInput): { deliveredTo: PeerId[] } => {
 			const topic = stmtGetTopic.get(input.topicId);
@@ -920,6 +978,7 @@ export function openDatabase(dbPath: string) {
 		fetchTopicDetail,
 		listTopicSubscribers,
 		listTopicSummaries,
+		listDmConversations,
 		topicSend: (input: TopicSendInput) => topicSendTx(input),
 		monitorTopic: (topicId: TopicId, peerId: PeerId, max: number) =>
 			monitorTopicTx(topicId, peerId, max),
