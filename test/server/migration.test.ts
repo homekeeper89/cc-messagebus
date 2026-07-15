@@ -245,7 +245,7 @@ describe("migration v1 → v2", () => {
 		assert.equal(dm?.topic_message_id, "cm-1");
 
 		const userVersion = raw.pragma("user_version", { simple: true });
-		assert.equal(userVersion, 5);
+		assert.equal(userVersion, 6);
 
 		raw.close();
 	});
@@ -264,7 +264,7 @@ describe("migration v1 → v2", () => {
 
 		const raw = new Database(dbPath, { readonly: true });
 		const userVersion = raw.pragma("user_version", { simple: true });
-		assert.equal(userVersion, 5);
+		assert.equal(userVersion, 6);
 		raw.close();
 	});
 });
@@ -384,7 +384,7 @@ describe("migration v2 → v3 (messages.topic_message_id CASCADE)", () => {
 		db.close();
 
 		const raw = new Database(dbPath, { readonly: true });
-		assert.equal(raw.pragma("user_version", { simple: true }), 5);
+		assert.equal(raw.pragma("user_version", { simple: true }), 6);
 
 		const msg = raw
 			.prepare<[], { id: string; topic_message_id: string | null }>(
@@ -527,7 +527,7 @@ describe("migration v3 → v4 (topic_subscriptions.last_seen_message_id)", () =>
 		db.close();
 
 		const raw = new Database(dbPath, { readonly: true });
-		assert.equal(raw.pragma("user_version", { simple: true }), 5);
+		assert.equal(raw.pragma("user_version", { simple: true }), 6);
 		assert.ok(
 			tableHasColumn(raw, "topic_subscriptions", "last_seen_message_id"),
 			"topic_subscriptions.last_seen_message_id must exist after migration",
@@ -579,12 +579,12 @@ describe("migration v3 → v4 (topic_subscriptions.last_seen_message_id)", () =>
 		raw.close();
 	});
 
-	test("test_fresh_database_should_be_at_user_version_5", () => {
+	test("test_fresh_database_should_be_at_user_version_6", () => {
 		const db = openDatabase(dbPath);
 		db.close();
 
 		const raw = new Database(dbPath, { readonly: true });
-		assert.equal(raw.pragma("user_version", { simple: true }), 5);
+		assert.equal(raw.pragma("user_version", { simple: true }), 6);
 		assert.ok(
 			tableHasColumn(raw, "topic_subscriptions", "last_seen_message_id"),
 			"fresh DB must include v4 last_seen_message_id column",
@@ -592,6 +592,10 @@ describe("migration v3 → v4 (topic_subscriptions.last_seen_message_id)", () =>
 		assert.ok(
 			tableHasColumn(raw, "sessions", "pid"),
 			"fresh DB must include v5 sessions.pid column",
+		);
+		assert.ok(
+			tableHasColumn(raw, "topics", "archived_at"),
+			"fresh DB must include v6 topics.archived_at column",
 		);
 		raw.close();
 	});
@@ -606,6 +610,11 @@ describe("migration v3 → v4 (topic_subscriptions.last_seen_message_id)", () =>
 				connected_at TEXT NOT NULL,
 				last_seen_at TEXT NOT NULL,
 				last_activity_at TEXT
+			);
+			CREATE TABLE topics (
+				id TEXT PRIMARY KEY,
+				created_at TEXT NOT NULL,
+				created_by TEXT NOT NULL
 			);
 		`);
 		raw.pragma("user_version = 4");
@@ -632,7 +641,7 @@ describe("migration v3 → v4 (topic_subscriptions.last_seen_message_id)", () =>
 		db.close();
 
 		const raw = new Database(dbPath, { readonly: true });
-		assert.equal(raw.pragma("user_version", { simple: true }), 5);
+		assert.equal(raw.pragma("user_version", { simple: true }), 6);
 		assert.ok(
 			tableHasColumn(raw, "sessions", "pid"),
 			"sessions.pid column must exist after v5 migration",

@@ -534,4 +534,130 @@ describe("broker topics", () => {
 			);
 		});
 	});
+
+	describe("topicArchive", () => {
+		test("sets archivedAt and emits topic_archived", () => {
+			broker.register({ peerId: "alice" });
+			broker.topicCreate({ topicId: "ch-1", createdBy: "alice" });
+			let receivedEvent: { topicId: string; archivedAt: string } | null = null;
+			broker.events.on("topic_archived", (e) => {
+				receivedEvent = e as { topicId: string; archivedAt: string };
+			});
+
+			const result = broker.topicArchive({ topicId: "ch-1" });
+			assert.ok(result.archivedAt);
+			assert.ok(receivedEvent);
+			const event = receivedEvent as unknown as {
+				topicId: string;
+				archivedAt: string;
+			};
+			assert.equal(event.topicId, "ch-1");
+			assert.equal(event.archivedAt, result.archivedAt);
+		});
+
+		test("list_topics returns archivedAt after archive", () => {
+			broker.register({ peerId: "alice" });
+			broker.topicCreate({ topicId: "ch-1", createdBy: "alice" });
+			broker.topicCreate({ topicId: "ch-2", createdBy: "alice" });
+			broker.topicArchive({ topicId: "ch-1" });
+
+			const list = broker.listTopics();
+			const ch1 = list.topics.find((t) => t.topicId === "ch-1");
+			const ch2 = list.topics.find((t) => t.topicId === "ch-2");
+			assert.ok(ch1?.archivedAt, "archived topic must expose archivedAt");
+			assert.equal(
+				ch2?.archivedAt,
+				null,
+				"non-archived topic must have archivedAt=null",
+			);
+		});
+
+		test("send still works on archived topic (hidden-only semantics)", () => {
+			broker.register({ peerId: "alice" });
+			broker.register({ peerId: "bob" });
+			broker.topicCreate({ topicId: "ch-1", createdBy: "alice" });
+			broker.topicSubscribe({ topicId: "ch-1", peerId: "bob" });
+			broker.topicArchive({ topicId: "ch-1" });
+
+			const result = broker.topicSend({
+				topicId: "ch-1",
+				from: "alice",
+				subject: "hi",
+				body: "after archive",
+			});
+			assert.equal(
+				result.deliveredTo.length,
+				1,
+				"archive must not block fan-out (UI-hidden only)",
+			);
+			assert.ok(result.deliveredTo.includes("bob"));
+		});
+
+		test("throws TOPIC_NOT_FOUND on missing topic", () => {
+			assert.throws(
+				() => broker.topicArchive({ topicId: "ghost-ch" }),
+				(err: unknown) =>
+					err instanceof BrokerError && err.code === "TOPIC_NOT_FOUND",
+			);
+		});
+
+		test("re-archive is idempotent (no throw)", () => {
+			broker.register({ peerId: "alice" });
+			broker.topicCreate({ topicId: "ch-1", createdBy: "alice" });
+			broker.topicArchive({ topicId: "ch-1" });
+			const second = broker.topicArchive({ topicId: "ch-1" });
+			assert.ok(
+				second.archivedAt,
+				"re-archive must return archivedAt without throwing",
+			);
+		});
+	});
+
+	describe("topicUnarchive", () => {
+		test("clears archivedAt and emits topic_unarchived", () => {
+			broker.register({ peerId: "alice" });
+			broker.topicCreate({ topicId: "ch-1", createdBy: "alice" });
+			broker.topicArchive({ topicId: "ch-1" });
+			let receivedEvent: { topicId: string; at: string } | null = null;
+			broker.events.on("topic_unarchived", (e) => {
+				receivedEvent = e as { topicId: string; at: string };
+			});
+
+			const result = broker.topicUnarchive({ topicId: "ch-1" });
+			assert.ok(result.unarchivedAt);
+			assert.ok(receivedEvent);
+			const event = receivedEvent as unknown as {
+				topicId: string;
+				at: string;
+			};
+			assert.equal(event.topicId, "ch-1");
+			assert.equal(event.at, result.unarchivedAt);
+
+			const list = broker.listTopics();
+			const ch1 = list.topics.find((t) => t.topicId === "ch-1");
+			assert.equal(
+				ch1?.archivedAt,
+				null,
+				"archivedAt must be null after unarchive",
+			);
+		});
+
+		test("throws TOPIC_NOT_FOUND on missing topic", () => {
+			assert.throws(
+				() => broker.topicUnarchive({ topicId: "ghost-ch" }),
+				(err: unknown) =>
+					err instanceof BrokerError && err.code === "TOPIC_NOT_FOUND",
+			);
+		});
+
+		test("unarchive on non-archived topic is idempotent (no throw)", () => {
+			broker.register({ peerId: "alice" });
+			broker.topicCreate({ topicId: "ch-1", createdBy: "alice" });
+			const result = broker.topicUnarchive({ topicId: "ch-1" });
+			assert.ok(
+				result.unarchivedAt,
+				"unarchive on already-active topic must return unarchivedAt without throwing",
+			);
+		});
+	});
 });
