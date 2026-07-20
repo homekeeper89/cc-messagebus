@@ -195,6 +195,23 @@
 				padding: 4px 16px;
 				cursor: default;
 			}
+			details.tree-section > summary {
+				list-style: revert;
+				cursor: pointer;
+				padding: 4px 0;
+				font-size: 12px;
+				text-transform: uppercase;
+				letter-spacing: 0.04em;
+				color: var(--muted);
+			}
+			details.tree-section > summary::marker {
+				color: var(--muted);
+			}
+			#topics-archived li[data-archived="1"] .name {
+				color: var(--muted);
+				text-decoration: line-through;
+				text-decoration-color: rgba(139, 148, 158, 0.4);
+			}
 			.tree-list .empty:hover {
 				background: transparent;
 			}
@@ -795,6 +812,14 @@
 						<li class="empty">(no topics)</li>
 					</ul>
 				</div>
+				<details class="tree-section" id="topics-archived-section" hidden>
+					<summary class="tree-section-head">
+						<span>Archived <span id="topics-archived-count">(0)</span></span>
+					</summary>
+					<ul id="topics-archived" class="tree-list">
+						<li class="empty">(no archived topics)</li>
+					</ul>
+				</details>
 				<div class="tree-section">
 					<h2>DMs <span id="dms-count">(0)</span></h2>
 					<ul id="dms" class="tree-list">
@@ -826,6 +851,8 @@
 					<p id="detail-meta" class="muted-line"></p>
 					<div class="detail-actions">
 						<button type="button" id="broadcast-toggle">📢 Broadcast</button>
+						<button type="button" id="topic-archive" hidden>📦 Archive</button>
+						<button type="button" id="topic-unarchive" hidden>↩ Unarchive</button>
 						<button type="button" id="topic-delete" class="danger">🗑 Delete topic</button>
 					</div>
 					<form id="broadcast-form" class="broadcast-form" hidden>
@@ -964,6 +991,8 @@
 			const broadcastErrEl = document.getElementById("broadcast-err");
 			const broadcastCancelBtn = document.getElementById("broadcast-cancel");
 			const topicDeleteBtn = document.getElementById("topic-delete");
+			const topicArchiveBtn = document.getElementById("topic-archive");
+			const topicUnarchiveBtn = document.getElementById("topic-unarchive");
 			const confirmModal = document.getElementById("confirm-modal");
 			const confirmTitleEl = document.getElementById("confirm-title");
 			const confirmBodyEl = document.getElementById("confirm-body");
@@ -1127,22 +1156,44 @@
 			}
 
 			function renderTopics() {
-				topicsCountEl.textContent = `(${topics.size})`;
-				if (topics.size === 0) {
-					topicsEl.replaceChildren();
-					const li = document.createElement("li");
-					li.className = "empty";
-					li.textContent = "(no topics)";
-					topicsEl.append(li);
+				const all = [...topics.values()];
+				const active = all.filter((t) => !t.archivedAt);
+				const archived = all.filter((t) => t.archivedAt);
+				topicsCountEl.textContent = `(${active.length})`;
+				renderTopicList(topicsEl, active, "(no topics)");
+
+				const archivedSection = document.getElementById(
+					"topics-archived-section",
+				);
+				const archivedCountEl = document.getElementById(
+					"topics-archived-count",
+				);
+				const archivedListEl = document.getElementById("topics-archived");
+				if (archived.length === 0) {
+					archivedSection.hidden = true;
 					return;
 				}
-				const entries = [...topics.values()].sort((a, b) =>
+				archivedSection.hidden = false;
+				archivedCountEl.textContent = `(${archived.length})`;
+				renderTopicList(archivedListEl, archived, "(no archived topics)");
+			}
+
+			function renderTopicList(el, entries, emptyLabel) {
+				if (entries.length === 0) {
+					const li = document.createElement("li");
+					li.className = "empty";
+					li.textContent = emptyLabel;
+					el.replaceChildren(li);
+					return;
+				}
+				const sorted = [...entries].sort((a, b) =>
 					compareDescNullsLast(a.lastPublishedAt, b.lastPublishedAt),
 				);
-				topicsEl.replaceChildren(
-					...entries.map((c) => {
+				el.replaceChildren(
+					...sorted.map((c) => {
 						const li = document.createElement("li");
 						li.dataset.topicId = c.topicId;
+						if (c.archivedAt) li.dataset.archived = "1";
 						if (
 							selectedContext.type === "topic" &&
 							selectedContext.topicId === c.topicId
@@ -1505,6 +1556,20 @@
 				});
 			});
 
+			topicArchiveBtn.addEventListener("click", async () => {
+				if (!topicDetail) return;
+				await postJson("/api/topic_archive", {
+					topicId: topicDetail.topicId,
+				});
+			});
+
+			topicUnarchiveBtn.addEventListener("click", async () => {
+				if (!topicDetail) return;
+				await postJson("/api/topic_unarchive", {
+					topicId: topicDetail.topicId,
+				});
+			});
+
 			function requestPeerDelete(peerId) {
 				openConfirmModal({
 					title: "Delete peer",
@@ -1517,11 +1582,16 @@
 
 			function renderDetailHeader() {
 				if (!topicDetail) return;
-				detailTitleEl.textContent = `#${topicDetail.topicId}`;
+				const archived = !!topicDetail.archivedAt;
+				detailTitleEl.textContent = archived
+					? `#${topicDetail.topicId} (archived)`
+					: `#${topicDetail.topicId}`;
 				const subCount = topicDetail.subscribers.length;
 				const created = new Date(topicDetail.createdAt).toLocaleString();
 				const noun = subCount === 1 ? "subscriber" : "subscribers";
 				detailMetaEl.textContent = `created by ${topicDetail.createdBy} · ${created} · ${subCount} ${noun}`;
+				topicArchiveBtn.hidden = archived;
+				topicUnarchiveBtn.hidden = !archived;
 			}
 
 			function renderDetailSubscribers() {
@@ -1943,6 +2013,38 @@
 						selectedContext = { type: "all" };
 						renderTreeSelection();
 						renderFlowHeader();
+					}
+				});
+				es.addEventListener("topic_archived", (e) => {
+					const data = JSON.parse(e.data);
+					const t = topics.get(data.topicId);
+					if (t) {
+						topics.set(data.topicId, { ...t, archivedAt: data.archivedAt });
+						renderTopics();
+					}
+					if (
+						isDetailMode() &&
+						selectedContext.topicId === data.topicId &&
+						topicDetail
+					) {
+						topicDetail = { ...topicDetail, archivedAt: data.archivedAt };
+						renderDetailHeader();
+					}
+				});
+				es.addEventListener("topic_unarchived", (e) => {
+					const data = JSON.parse(e.data);
+					const t = topics.get(data.topicId);
+					if (t) {
+						topics.set(data.topicId, { ...t, archivedAt: null });
+						renderTopics();
+					}
+					if (
+						isDetailMode() &&
+						selectedContext.topicId === data.topicId &&
+						topicDetail
+					) {
+						topicDetail = { ...topicDetail, archivedAt: null };
+						renderDetailHeader();
 					}
 				});
 				es.addEventListener("peer_deleted", (e) => {

@@ -12,12 +12,14 @@ import {
 	type ReadRequest,
 	type RegisterRequest,
 	type SendRequest,
+	type TopicArchiveRequest,
 	type TopicCreateRequest,
 	type TopicDetailRequest,
 	type TopicHistoryRequest,
 	type TopicMonitorRequest,
 	type TopicSendRequest,
 	type TopicSubscribeRequest,
+	type TopicUnarchiveRequest,
 	type TopicUnsubscribeRequest,
 	type UnregisterRequest,
 } from "../protocol/http.js";
@@ -216,6 +218,18 @@ const CHANNEL_DELETE_BODY = {
 	required: ["topicId"],
 	additionalProperties: false,
 };
+const TOPIC_ARCHIVE_BODY = {
+	type: "object",
+	properties: { topicId: TOPIC_ID_SCHEMA },
+	required: ["topicId"],
+	additionalProperties: false,
+};
+const TOPIC_UNARCHIVE_BODY = {
+	type: "object",
+	properties: { topicId: TOPIC_ID_SCHEMA },
+	required: ["topicId"],
+	additionalProperties: false,
+};
 const PEER_DELETE_BODY = {
 	type: "object",
 	properties: { peerId: PEER_ID_SCHEMA },
@@ -393,6 +407,16 @@ export function createServer(opts: ServerOptions): Server {
 		HTTP_ENDPOINTS.channelDelete.path,
 		{ schema: { body: CHANNEL_DELETE_BODY } },
 		async (req) => ({ ok: true, ...broker.channelDelete(req.body) }),
+	);
+	app.post<{ Body: TopicArchiveRequest }>(
+		HTTP_ENDPOINTS.topicArchive.path,
+		{ schema: { body: TOPIC_ARCHIVE_BODY } },
+		async (req) => ({ ok: true, ...broker.topicArchive(req.body) }),
+	);
+	app.post<{ Body: TopicUnarchiveRequest }>(
+		HTTP_ENDPOINTS.topicUnarchive.path,
+		{ schema: { body: TOPIC_UNARCHIVE_BODY } },
+		async (req) => ({ ok: true, ...broker.topicUnarchive(req.body) }),
 	);
 
 	app.post<{ Body: PeerDeleteRequest }>(

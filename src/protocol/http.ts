@@ -48,6 +48,7 @@ export interface TopicSummaryDto {
 	createdAt: IsoTimestamp;
 	subscriberCount: number;
 	lastPublishedAt: IsoTimestamp | null;
+	archivedAt: IsoTimestamp | null;
 }
 
 export interface SubscriberDto {
@@ -62,6 +63,7 @@ export interface TopicDetailDto {
 	createdBy: PeerId;
 	createdAt: IsoTimestamp;
 	subscribers: SubscriberDto[];
+	archivedAt: IsoTimestamp | null;
 }
 
 export interface TopicMessageDto {
@@ -107,6 +109,8 @@ export const HTTP_ENDPOINTS = {
 	serverInfo: { method: "POST", path: "/api/server_info" },
 	channelBroadcast: { method: "POST", path: "/api/channel_broadcast" },
 	channelDelete: { method: "POST", path: "/api/channel_delete" },
+	topicArchive: { method: "POST", path: "/api/topic_archive" },
+	topicUnarchive: { method: "POST", path: "/api/topic_unarchive" },
 	peerDelete: { method: "POST", path: "/api/peer_delete" },
 	peersClean: { method: "POST", path: "/api/peers_clean" },
 } as const;
@@ -285,6 +289,20 @@ export interface ChannelDeleteResponse {
 	deletedSubs: number;
 }
 
+export interface TopicArchiveRequest {
+	topicId: TopicId;
+}
+export interface TopicArchiveResponse {
+	archivedAt: IsoTimestamp;
+}
+
+export interface TopicUnarchiveRequest {
+	topicId: TopicId;
+}
+export interface TopicUnarchiveResponse {
+	unarchivedAt: IsoTimestamp;
+}
+
 export interface PeerDeleteRequest {
 	peerId: PeerId;
 }
@@ -322,5 +340,7 @@ export type DiagnosticsApiResponse = ApiResponse<DiagnosticsResponse>;
 export type ServerInfoApiResponse = ApiResponse<ServerInfoResponse>;
 export type ChannelBroadcastApiResponse = ApiResponse<ChannelBroadcastResponse>;
 export type ChannelDeleteApiResponse = ApiResponse<ChannelDeleteResponse>;
+export type TopicArchiveApiResponse = ApiResponse<TopicArchiveResponse>;
+export type TopicUnarchiveApiResponse = ApiResponse<TopicUnarchiveResponse>;
 export type PeerDeleteApiResponse = ApiResponse<PeerDeleteResponse>;
 export type PeersCleanApiResponse = ApiResponse<PeersCleanResponse>;

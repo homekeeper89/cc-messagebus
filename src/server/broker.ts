@@ -27,6 +27,8 @@ import type {
 	SendRequest,
 	SendResponse,
 	ServerInfoResponse,
+	TopicArchiveRequest,
+	TopicArchiveResponse,
 	TopicCreateRequest,
 	TopicCreateResponse,
 	TopicDetailRequest,
@@ -42,6 +44,8 @@ import type {
 	TopicSendResponse,
 	TopicSubscribeRequest,
 	TopicSubscribeResponse,
+	TopicUnarchiveRequest,
+	TopicUnarchiveResponse,
 	TopicUnsubscribeRequest,
 	TopicUnsubscribeResponse,
 	UnregisterRequest,
@@ -97,6 +101,8 @@ export interface Broker {
 	serverInfo: () => ServerInfoResponse;
 	channelBroadcast: (req: ChannelBroadcastRequest) => ChannelBroadcastResponse;
 	channelDelete: (req: ChannelDeleteRequest) => ChannelDeleteResponse;
+	topicArchive: (req: TopicArchiveRequest) => TopicArchiveResponse;
+	topicUnarchive: (req: TopicUnarchiveRequest) => TopicUnarchiveResponse;
 	peerDelete: (req: PeerDeleteRequest) => PeerDeleteResponse;
 	peersClean: () => PeersCleanResponse;
 }
@@ -703,6 +709,48 @@ export function createBroker(db: CcDatabase, opts: BrokerOptions): Broker {
 		};
 	}
 
+	function topicArchive(req: TopicArchiveRequest): TopicArchiveResponse {
+		const now = nowIso();
+		try {
+			db.archiveTopic(req.topicId, now);
+		} catch (e) {
+			if (e instanceof DbError && e.code === "TOPIC_NOT_FOUND") {
+				throw new BrokerError(
+					"TOPIC_NOT_FOUND",
+					`topic '${req.topicId}' not found`,
+				);
+			}
+			throw e;
+		}
+		emit({
+			type: "topic_archived",
+			topicId: req.topicId,
+			archivedAt: now,
+		});
+		return { archivedAt: now };
+	}
+
+	function topicUnarchive(req: TopicUnarchiveRequest): TopicUnarchiveResponse {
+		const now = nowIso();
+		try {
+			db.unarchiveTopic(req.topicId);
+		} catch (e) {
+			if (e instanceof DbError && e.code === "TOPIC_NOT_FOUND") {
+				throw new BrokerError(
+					"TOPIC_NOT_FOUND",
+					`topic '${req.topicId}' not found`,
+				);
+			}
+			throw e;
+		}
+		emit({
+			type: "topic_unarchived",
+			topicId: req.topicId,
+			at: now,
+		});
+		return { unarchivedAt: now };
+	}
+
 	function channelDelete(req: ChannelDeleteRequest): ChannelDeleteResponse {
 		let stats: { deletedMessages: number; deletedSubs: number };
 		try {
@@ -805,6 +853,8 @@ export function createBroker(db: CcDatabase, opts: BrokerOptions): Broker {
 		serverInfo,
 		channelBroadcast: instrument("channelBroadcast", channelBroadcast),
 		channelDelete: instrument("channelDelete", channelDelete),
+		topicArchive: instrument("topicArchive", topicArchive),
+		topicUnarchive: instrument("topicUnarchive", topicUnarchive),
 		peerDelete: instrument("peerDelete", peerDelete),
 		peersClean: instrument("peersClean", peersClean),
 	};

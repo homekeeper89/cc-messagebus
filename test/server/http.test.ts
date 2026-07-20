@@ -39,6 +39,7 @@ describe("http", () => {
 			visibilityTimeoutSec: 30,
 			ttlDays: 30,
 			cleanupIntervalSec: 60,
+			config: { issueRepo: null },
 		});
 		await server.app.ready();
 	});

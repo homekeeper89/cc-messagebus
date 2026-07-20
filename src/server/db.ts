@@ -42,7 +42,8 @@ CREATE TABLE IF NOT EXISTS sessions (
 CREATE TABLE IF NOT EXISTS topics (
 	id TEXT PRIMARY KEY,
 	created_at TEXT NOT NULL,
-	created_by TEXT NOT NULL
+	created_by TEXT NOT NULL,
+	archived_at TEXT
 );
 
 CREATE TABLE IF NOT EXISTS topic_subscriptions (
@@ -117,6 +118,10 @@ const MIGRATE_V4_TO_V5_SQL = `
 ALTER TABLE sessions ADD COLUMN pid INTEGER;
 `;
 
+const MIGRATE_V5_TO_V6_SQL = `
+ALTER TABLE topics ADD COLUMN archived_at TEXT;
+`;
+
 // SQLite cannot ALTER an existing FK clause. v3 rebuilds messages so that
 // topic_message_id cascades on topic_messages delete (was SET NULL in v2).
 const MIGRATE_V2_TO_V3_SQL = `
@@ -168,6 +173,7 @@ interface TopicRow {
 	id: string;
 	created_at: string;
 	created_by: string;
+	archived_at: string | null;
 }
 
 export interface TopicSendInput {
@@ -200,6 +206,7 @@ export interface TopicDetailRow {
 		queueDepth: number;
 		lastReadAt: IsoTimestamp | null;
 	}>;
+	archivedAt: IsoTimestamp | null;
 }
 
 function rowToPeer(row: SessionRow, queueLength: number): PeerDto {
@@ -289,6 +296,19 @@ function migrateV4ToV5(db: Database.Database): void {
 	}
 }
 
+function migrateV5ToV6(db: Database.Database): void {
+	db.pragma("foreign_keys = OFF");
+	try {
+		const tx = db.transaction(() => {
+			db.exec(MIGRATE_V5_TO_V6_SQL);
+			db.pragma("user_version = 6");
+		});
+		tx();
+	} finally {
+		db.pragma("foreign_keys = ON");
+	}
+}
+
 export function openDatabase(dbPath: string) {
 	mkdirSync(dirname(dbPath), { recursive: true });
 	const db = new Database(dbPath);
@@ -309,7 +329,7 @@ export function openDatabase(dbPath: string) {
 	db.exec(SCHEMA_DDL);
 
 	if (isFreshDb) {
-		db.pragma("user_version = 5");
+		db.pragma("user_version = 6");
 	}
 
 	let userVersion = db.pragma("user_version", { simple: true }) as number;
@@ -328,6 +348,10 @@ export function openDatabase(dbPath: string) {
 	if (userVersion === 4) {
 		migrateV4ToV5(db);
 		userVersion = 5;
+	}
+	if (userVersion === 5) {
+		migrateV5ToV6(db);
+		userVersion = 6;
 	}
 
 	const stmtGetSession = db.prepare<[string], SessionRow>(
@@ -500,9 +524,10 @@ export function openDatabase(dbPath: string) {
 			created_at: string;
 			subscriber_count: number;
 			last_published_at: string | null;
+			archived_at: string | null;
 		}
 	>(
-		`SELECT t.id, t.created_by, t.created_at,
+		`SELECT t.id, t.created_by, t.created_at, t.archived_at,
 		        COALESCE(COUNT(DISTINCT s.subscriber_peer_id), 0) AS subscriber_count,
 		        MAX(tm.sent_at) AS last_published_at
 		 FROM topics t
@@ -510,6 +535,12 @@ export function openDatabase(dbPath: string) {
 		 LEFT JOIN topic_messages tm ON tm.topic_id = t.id
 		 GROUP BY t.id
 		 ORDER BY MAX(tm.sent_at) DESC NULLS LAST, t.created_at ASC`,
+	);
+	const stmtArchiveTopic = db.prepare<[string, string], { changes: number }>(
+		"UPDATE topics SET archived_at = ? WHERE id = ? AND archived_at IS NULL",
+	);
+	const stmtUnarchiveTopic = db.prepare<[string], { changes: number }>(
+		"UPDATE topics SET archived_at = NULL WHERE id = ? AND archived_at IS NOT NULL",
 	);
 	const stmtListDmConversations = db.prepare<
 		[],
@@ -824,6 +855,7 @@ export function openDatabase(dbPath: string) {
 				queueDepth: r.queue_depth,
 				lastReadAt: r.last_read_at,
 			})),
+			archivedAt: topic.archived_at,
 		};
 	}
 
@@ -835,7 +867,20 @@ export function openDatabase(dbPath: string) {
 			createdAt: r.created_at,
 			subscriberCount: r.subscriber_count,
 			lastPublishedAt: r.last_published_at,
+			archivedAt: r.archived_at,
 		}));
+	}
+
+	function archiveTopic(topicId: TopicId, now: IsoTimestamp): void {
+		const topic = stmtGetTopic.get(topicId);
+		if (!topic) throw new DbError("TOPIC_NOT_FOUND");
+		stmtArchiveTopic.run(now, topicId);
+	}
+
+	function unarchiveTopic(topicId: TopicId): void {
+		const topic = stmtGetTopic.get(topicId);
+		if (!topic) throw new DbError("TOPIC_NOT_FOUND");
+		stmtUnarchiveTopic.run(topicId);
 	}
 
 	function listDmConversations(): DmConversationDto[] {
@@ -978,6 +1023,8 @@ export function openDatabase(dbPath: string) {
 		fetchTopicDetail,
 		listTopicSubscribers,
 		listTopicSummaries,
+		archiveTopic,
+		unarchiveTopic,
 		listDmConversations,
 		topicSend: (input: TopicSendInput) => topicSendTx(input),
 		monitorTopic: (topicId: TopicId, peerId: PeerId, max: number) =>
