@@ -1,6 +1,6 @@
 {
   "name": "cc-messagebus",
-  "version": "0.5.0",
+  "version": "0.6.0",
   "description": "Cross-session message bus for Claude Code with central observability",
   "author": {
     "name": "KimJangHoon"
