@@ -9,6 +9,7 @@ import type {
 	ChannelDeleteRequest,
 	ChannelDeleteResponse,
 	DiagnosticsResponse,
+	ListDmConversationsResponse,
 	ListPeersResponse,
 	ListTopicsResponse,
 	MessageDto,
@@ -87,6 +88,7 @@ export interface Broker {
 	ack: (req: AckRequest) => AckResponse;
 	listPeers: () => ListPeersResponse;
 	listTopics: () => ListTopicsResponse;
+	listDmConversations: () => ListDmConversationsResponse;
 	disconnect: (peerId: PeerId) => void;
 	topicCreate: (req: TopicCreateRequest) => TopicCreateResponse;
 	topicSubscribe: (req: TopicSubscribeRequest) => TopicSubscribeResponse;
@@ -329,6 +331,10 @@ export function createBroker(db: CcDatabase, opts: BrokerOptions): Broker {
 
 	function listTopics(): ListTopicsResponse {
 		return { topics: db.listTopicSummaries() };
+	}
+
+	function listDmConversations(): ListDmConversationsResponse {
+		return { conversations: db.listDmConversations() };
 	}
 
 	function disconnect(peerId: PeerId): void {
@@ -832,6 +838,7 @@ export function createBroker(db: CcDatabase, opts: BrokerOptions): Broker {
 		ack: instrument("ack", ack),
 		listPeers: instrument("listPeers", listPeers),
 		listTopics: instrument("listTopics", listTopics),
+		listDmConversations: instrument("listDmConversations", listDmConversations),
 		// disconnect 는 SSE close 콜백 — RPC 가 아니므로 ring 기록 제외.
 		disconnect,
 		topicCreate: instrument("topicCreate", topicCreate),

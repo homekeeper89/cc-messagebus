@@ -208,6 +208,122 @@ describe("runTail (polling)", () => {
 		assert.match(stderr[0] ?? "", /ack failed for m1.*MESSAGE_NOT_IN_FLIGHT/);
 	});
 
+	test("network error triggers reconnect backoff and resumes polling", async () => {
+		const ctrl = new AbortController();
+		const stdout: string[] = [];
+		const stderr: string[] = [];
+		const sleepCalls: number[] = [];
+		const m1 = fakeMessage("m1");
+
+		const netErr = new TypeError("fetch failed");
+		const { fetchFn, calls } = makeFetchMock([
+			() => {
+				throw netErr;
+			},
+			() => {
+				throw netErr;
+			},
+			() => jsonResp({ ok: true, messages: [m1] }),
+			() => jsonResp({ ok: true, ackedAt: "ack-1" }),
+			() => {
+				ctrl.abort();
+				return jsonResp({ ok: true, messages: [] });
+			},
+		]);
+
+		await runTail("bob", {
+			baseUrl: "http://test",
+			intervalMs: 999,
+			reconnectBaseMs: 100,
+			reconnectMaxMs: 500,
+			fetchFn,
+			stdoutWrite: (s) => stdout.push(s),
+			stderrWrite: (s) => stderr.push(s),
+			sleep: async (ms) => {
+				sleepCalls.push(ms);
+			},
+			signal: ctrl.signal,
+		});
+
+		assert.equal(
+			calls.length,
+			5,
+			"2 failed reads + successful read + ack + final read",
+		);
+		assert.deepEqual(
+			sleepCalls,
+			[100, 200, 999],
+			"backoff 100ms then 200ms, then normal interval after success",
+		);
+		assert.equal(stdout.length, 1);
+		assert.equal(stderr.length, 2, "one reconnect log per failed attempt");
+		assert.match(stderr[0] ?? "", /broker unreachable.*reconnecting in 100ms/);
+		assert.match(stderr[1] ?? "", /broker unreachable.*reconnecting in 200ms/);
+	});
+
+	test("network error during ack retries and continues", async () => {
+		const ctrl = new AbortController();
+		const stdout: string[] = [];
+		const stderr: string[] = [];
+		const m1 = fakeMessage("m1");
+
+		const { fetchFn, calls } = makeFetchMock([
+			() => jsonResp({ ok: true, messages: [m1] }),
+			() => {
+				throw new TypeError("fetch failed");
+			},
+			() => jsonResp({ ok: true, ackedAt: "ack-1" }),
+			() => {
+				ctrl.abort();
+				return jsonResp({ ok: true, messages: [] });
+			},
+		]);
+
+		await runTail("bob", {
+			baseUrl: "http://test",
+			intervalMs: 1,
+			reconnectBaseMs: 1,
+			reconnectMaxMs: 1,
+			fetchFn,
+			stdoutWrite: (s) => stdout.push(s),
+			stderrWrite: (s) => stderr.push(s),
+			sleep: async () => {},
+			signal: ctrl.signal,
+		});
+
+		assert.equal(calls.length, 4, "read + failed ack + retry ack + final read");
+		assert.equal(stdout.length, 1);
+		assert.equal(stderr.length, 1);
+		assert.match(stderr[0] ?? "", /broker unreachable/);
+	});
+
+	test("abort during reconnect backoff exits cleanly", async () => {
+		const ctrl = new AbortController();
+		const stderr: string[] = [];
+
+		const { fetchFn } = makeFetchMock([
+			() => {
+				throw new TypeError("fetch failed");
+			},
+		]);
+
+		await runTail("bob", {
+			baseUrl: "http://test",
+			intervalMs: 1,
+			reconnectBaseMs: 1,
+			reconnectMaxMs: 1,
+			fetchFn,
+			stdoutWrite: () => {},
+			stderrWrite: (s) => stderr.push(s),
+			sleep: async () => {
+				ctrl.abort();
+			},
+			signal: ctrl.signal,
+		});
+
+		assert.equal(stderr.length, 1, "one reconnect log before abort");
+	});
+
 	test("signal pre-aborted skips polling entirely", async () => {
 		const ctrl = new AbortController();
 		ctrl.abort();

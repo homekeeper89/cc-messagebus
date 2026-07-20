@@ -48,6 +48,13 @@
 				font-weight: 600;
 				letter-spacing: 0.02em;
 			}
+			header h1 .version {
+				margin-left: 6px;
+				font-size: 11px;
+				font-weight: 500;
+				color: var(--muted);
+				letter-spacing: 0;
+			}
 			.status {
 				display: inline-flex;
 				align-items: center;
@@ -786,7 +793,7 @@
 	</head>
 	<body>
 		<header>
-			<h1>cc-messagebus</h1>
+			<h1>cc-messagebus<span class="version" id="server-version"></span></h1>
 			<span id="status" class="status" data-state="connecting"
 				><span class="dot"></span><span id="status-text">connecting</span></span
 			>
@@ -813,6 +820,12 @@
 						<li class="empty">(no archived topics)</li>
 					</ul>
 				</details>
+				<div class="tree-section">
+					<h2>DMs <span id="dms-count">(0)</span></h2>
+					<ul id="dms" class="tree-list">
+						<li class="empty">(no DMs)</li>
+					</ul>
+				</div>
 				<div class="tree-section">
 					<h2 class="tree-section-head">
 						<span>Peers <span id="peers-count">(0)</span></span>
@@ -944,6 +957,7 @@
 
 			const sessions = new Map();
 			const topics = new Map();
+			const dmConversations = new Map();
 			const flowBuffer = [];
 			let selectedContext = { type: "all" };
 			let topicDetail = null;
@@ -954,6 +968,8 @@
 			const peersCountEl = document.getElementById("peers-count");
 			const topicsEl = document.getElementById("topics");
 			const topicsCountEl = document.getElementById("topics-count");
+			const dmsEl = document.getElementById("dms");
+			const dmsCountEl = document.getElementById("dms-count");
 			const treeAllEl = document.getElementById("tree-all");
 			const flowEl = document.getElementById("flow");
 			const flowHeaderEl = document.getElementById("flow-header");
@@ -1019,7 +1035,17 @@
 				if (a.type !== b.type) return false;
 				if (a.type === "agent") return a.peerId === b.peerId;
 				if (a.type === "topic") return a.topicId === b.topicId;
+				if (a.type === "dm")
+					return a.peerA === b.peerA && a.peerB === b.peerB;
 				return true;
+			}
+
+			function dmPairKey(a, b) {
+				return a < b ? `${a}␟${b}` : `${b}␟${a}`;
+			}
+
+			function dmPair(a, b) {
+				return a < b ? { peerA: a, peerB: b } : { peerA: b, peerB: a };
 			}
 
 			function renderTreeSelection() {
@@ -1031,6 +1057,8 @@
 				if (selectedContext.type === "agent") label = selectedContext.peerId;
 				else if (selectedContext.type === "topic")
 					label = `#${selectedContext.topicId}`;
+				else if (selectedContext.type === "dm")
+					label = `${selectedContext.peerA} ↔ ${selectedContext.peerB}`;
 								flowHeaderEl.textContent = `Message Flow · ${label}`;
 			}
 
@@ -1078,6 +1106,49 @@
 						li.append(dot, name, meta, del);
 						li.addEventListener("click", () =>
 							onTreeRowClick({ type: "agent", peerId: p.peerId }),
+						);
+						return li;
+					}),
+				);
+			}
+
+			function renderDms() {
+				dmsCountEl.textContent = `(${dmConversations.size})`;
+				if (dmConversations.size === 0) {
+					dmsEl.replaceChildren();
+					const li = document.createElement("li");
+					li.className = "empty";
+					li.textContent = "(no DMs)";
+					dmsEl.append(li);
+					return;
+				}
+				const entries = [...dmConversations.values()].sort((a, b) =>
+					compareDescNullsLast(a.lastSentAt, b.lastSentAt),
+				);
+				dmsEl.replaceChildren(
+					...entries.map((c) => {
+						const li = document.createElement("li");
+						li.dataset.pair = dmPairKey(c.peerA, c.peerB);
+						if (
+							selectedContext.type === "dm" &&
+							selectedContext.peerA === c.peerA &&
+							selectedContext.peerB === c.peerB
+						) {
+							li.dataset.selected = "1";
+						}
+						const name = document.createElement("span");
+						name.className = "name";
+						name.textContent = `${c.peerA} ↔ ${c.peerB}`;
+						const meta = document.createElement("span");
+						meta.className = "meta";
+						meta.textContent = relativeAgo(c.lastSentAt);
+						li.append(name, meta);
+						li.addEventListener("click", () =>
+							onTreeRowClick({
+								type: "dm",
+								peerA: c.peerA,
+								peerB: c.peerB,
+							}),
 						);
 						return li;
 					}),
@@ -1241,6 +1312,16 @@
 						t === "topic_message_published"
 					)
 						return event.topicId === ctx.topicId;
+					return false;
+				}
+
+				if (ctx.type === "dm") {
+					const t = event.type;
+					if (t === "message_sent") {
+						if (event.kind && event.kind !== "dm") return false;
+						const pair = dmPair(event.message.from, event.message.to);
+						return pair.peerA === ctx.peerA && pair.peerB === ctx.peerB;
+					}
 					return false;
 				}
 
@@ -1651,6 +1732,7 @@
 				renderTreeSelection();
 				renderPeers();
 				renderTopics();
+				renderDms();
 				if (willBeDetail) {
 					enterTopicDetail(next.topicId);
 					loadTopicDetail(next.topicId);
@@ -1676,6 +1758,29 @@
 				topics.clear();
 				for (const t of topicList) topics.set(t.topicId, t);
 				renderTopics();
+			}
+
+			function applyDmConversationSnapshot(list) {
+				dmConversations.clear();
+				for (const c of list)
+					dmConversations.set(dmPairKey(c.peerA, c.peerB), c);
+				renderDms();
+			}
+
+			function applyDmMessage(message) {
+				const pair = dmPair(message.from, message.to);
+				const key = dmPairKey(message.from, message.to);
+				const existing = dmConversations.get(key);
+				dmConversations.set(key, {
+					peerA: pair.peerA,
+					peerB: pair.peerB,
+					lastFrom: message.from,
+					lastTo: message.to,
+					lastSubject: message.subject,
+					lastSentAt: message.sentAt,
+					messageCount: (existing?.messageCount ?? 0) + 1,
+				});
+				renderDms();
 			}
 
 			function applyRegistered(peer) {
@@ -1760,6 +1865,21 @@
 				}
 			}
 
+			async function loadInitialDmConversations() {
+				try {
+					const res = await fetch("/api/list_dm_conversations", {
+						method: "POST",
+						headers: { "Content-Type": "application/json" },
+						body: "{}",
+					});
+					const json = await res.json();
+					if (!json?.ok) return;
+					applyDmConversationSnapshot(json.conversations ?? []);
+				} catch {
+					// 무시: SSE message_sent로 점진 복구
+				}
+			}
+
 			function connect() {
 				const es = new EventSource("/events");
 				setStatus("connecting", "connecting");
@@ -1786,6 +1906,9 @@
 					applyQueueDelta(data.message.to, 1);
 					applyLastActivity(data.message.from, data.message.sentAt);
 					applyLastActivity(data.message.to, data.message.sentAt);
+					if (!data.kind || data.kind === "dm") {
+						applyDmMessage(data.message);
+					}
 					pushFlowMaybe(data);
 				});
 				es.addEventListener("message_read", (e) => {
@@ -2267,7 +2390,14 @@
 
 			renderFlowHeader();
 			loadInitialTopics();
+			loadInitialDmConversations();
 			connect();
+			fetchServerInfo().then((info) => {
+				if (info?.version) {
+					document.getElementById("server-version").textContent =
+						`v${info.version}`;
+				}
+			});
 		</script>
 	</body>
 </html>
