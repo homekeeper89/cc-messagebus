@@ -377,6 +377,13 @@ export function openDatabase(dbPath: string) {
 		[],
 		{ peer_id: string; pid: number | null; status: string }
 	>("SELECT peer_id, pid, status FROM sessions");
+	const stmtListConnectedByPidExcept = db.prepare<
+		[number, string],
+		{ peer_id: string }
+	>(
+		`SELECT peer_id FROM sessions
+		  WHERE pid = ? AND peer_id != ? AND status = '${SessionStatus.CONNECTED}'`,
+	);
 	const stmtDeleteSession = db.prepare<[string]>(
 		"DELETE FROM sessions WHERE peer_id = ?",
 	);
@@ -542,6 +549,16 @@ export function openDatabase(dbPath: string) {
 	const stmtUnarchiveTopic = db.prepare<[string], { changes: number }>(
 		"UPDATE topics SET archived_at = NULL WHERE id = ? AND archived_at IS NOT NULL",
 	);
+	const stmtListDmMessages = db.prepare<
+		[string, string, string, string, number],
+		MessageRow
+	>(
+		`SELECT * FROM messages
+		  WHERE topic_message_id IS NULL
+		    AND ((from_peer = ? AND to_peer = ?) OR (from_peer = ? AND to_peer = ?))
+		  ORDER BY sent_at ASC
+		  LIMIT ?`,
+	);
 	const stmtListDmConversations = db.prepare<
 		[],
 		{
@@ -693,6 +710,25 @@ export function openDatabase(dbPath: string) {
 			pid: r.pid,
 			status: r.status as SessionStatus,
 		}));
+	}
+
+	function listConnectedPeersByPid(
+		pid: number,
+		exceptPeerId: PeerId,
+	): PeerId[] {
+		return stmtListConnectedByPidExcept
+			.all(pid, exceptPeerId)
+			.map((r) => r.peer_id);
+	}
+
+	function listDmMessages(
+		peerA: PeerId,
+		peerB: PeerId,
+		limit: number,
+	): MessageDto[] {
+		return stmtListDmMessages
+			.all(peerA, peerB, peerB, peerA, limit)
+			.map(rowToMessage);
 	}
 
 	const unregisterTx = db.transaction(
@@ -1005,6 +1041,8 @@ export function openDatabase(dbPath: string) {
 		listSessions,
 		listConnectedWithPid,
 		listSessionsWithPid,
+		listConnectedPeersByPid,
+		listDmMessages,
 		insertMessage,
 		fetchDeliverable: (
 			peerId: PeerId,

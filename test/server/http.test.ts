@@ -645,6 +645,47 @@ describe("http", () => {
 		assert.equal(res.statusCode, 400);
 	});
 
+	test("POST /api/dm_history returns messages for peer pair in asc order", async () => {
+		await server.app.inject({
+			method: "POST",
+			url: "/api/register",
+			payload: { peerId: "alice" },
+		});
+		await server.app.inject({
+			method: "POST",
+			url: "/api/register",
+			payload: { peerId: "bob" },
+		});
+		await server.app.inject({
+			method: "POST",
+			url: "/api/send",
+			payload: { from: "alice", to: "bob", subject: "s1", body: "b1" },
+		});
+		await server.app.inject({
+			method: "POST",
+			url: "/api/send",
+			payload: { from: "bob", to: "alice", subject: "s2", body: "b2" },
+		});
+		const res = await server.app.inject({
+			method: "POST",
+			url: "/api/dm_history",
+			payload: { peerA: "alice", peerB: "bob" },
+		});
+		assert.equal(res.statusCode, 200);
+		const body = res.json();
+		assert.equal(body.ok, true);
+		assert.equal(body.messages.length, 2);
+	});
+
+	test("POST /api/dm_history with out-of-range limit returns 400", async () => {
+		const res = await server.app.inject({
+			method: "POST",
+			url: "/api/dm_history",
+			payload: { peerA: "alice", peerB: "bob", limit: 999999 },
+		});
+		assert.equal(res.statusCode, 400);
+	});
+
 	test("POST /api/topic_detail unknown topic returns 404 TOPIC_NOT_FOUND", async () => {
 		const res = await server.app.inject({
 			method: "POST",
