@@ -9,6 +9,8 @@ import type {
 	ChannelDeleteRequest,
 	ChannelDeleteResponse,
 	DiagnosticsResponse,
+	DmHistoryRequest,
+	DmHistoryResponse,
 	ListDmConversationsResponse,
 	ListPeersResponse,
 	ListTopicsResponse,
@@ -95,6 +97,7 @@ export interface Broker {
 	topicSend: (req: TopicSendRequest) => TopicSendResponse;
 	topicUnsubscribe: (req: TopicUnsubscribeRequest) => TopicUnsubscribeResponse;
 	topicHistory: (req: TopicHistoryRequest) => TopicHistoryResponse;
+	dmHistory: (req: DmHistoryRequest) => DmHistoryResponse;
 	topicDetail: (req: TopicDetailRequest) => TopicDetailResponse;
 	topicMonitor: (req: TopicMonitorRequest) => TopicMonitorResponse;
 	diagnostics: () => DiagnosticsResponse;
@@ -189,6 +192,20 @@ export function createBroker(db: CcDatabase, opts: BrokerOptions): Broker {
 
 	function register(req: RegisterRequest): RegisterResponse {
 		const now = nowIso();
+		// 같은 pid 로 등록된 다른 CONNECTED peer 는 rename 으로 간주하고 정리한다.
+		// MCP 프로세스 하나가 여러 peerId 로 register 하면 이전 peer 는 유령이 되어
+		// peersClean 이 alive-pid 라 sweep 못한다 (Bug 1).
+		if (req.pid != null) {
+			const orphans = db.listConnectedPeersByPid(req.pid, req.peerId);
+			for (const orphanPeerId of orphans) {
+				db.markDisconnected(orphanPeerId, now);
+				emit({
+					type: "session_disconnected",
+					peerId: orphanPeerId,
+					at: now,
+				});
+			}
+		}
 		let peer: ReturnType<typeof db.registerSession>;
 		try {
 			peer = db.registerSession(req.peerId, now, req.pid ?? null);
@@ -524,6 +541,18 @@ export function createBroker(db: CcDatabase, opts: BrokerOptions): Broker {
 		return { unsubscribedAt: now };
 	}
 
+	function dmHistory(req: DmHistoryRequest): DmHistoryResponse {
+		const requestedLimit = req.limit ?? HISTORY_LIMIT_DEFAULT;
+		if (requestedLimit < 1 || requestedLimit > HISTORY_LIMIT_MAX) {
+			throw new BrokerError(
+				"VALIDATION_FAILED",
+				`limit must be between 1 and ${HISTORY_LIMIT_MAX}`,
+			);
+		}
+		const messages = db.listDmMessages(req.peerA, req.peerB, requestedLimit);
+		return { messages };
+	}
+
 	// PRD `channels.prd.md` "What We're NOT Building": ACL 없음 — 누구나 read 가능.
 	// `requirePeerId` 없이 anonymous 호출 허용은 의도된 정책.
 	function topicHistory(req: TopicHistoryRequest): TopicHistoryResponse {
@@ -846,6 +875,7 @@ export function createBroker(db: CcDatabase, opts: BrokerOptions): Broker {
 		topicSend: instrument("topicSend", topicSend),
 		topicUnsubscribe: instrument("topicUnsubscribe", topicUnsubscribe),
 		topicHistory: instrument("topicHistory", topicHistory),
+		dmHistory: instrument("dmHistory", dmHistory),
 		topicDetail: instrument("topicDetail", topicDetail),
 		topicMonitor: instrument("topicMonitor", topicMonitor),
 		// diagnostics 자체는 ring 기록 제외 — snapshot 호출이 자기 자신을 오염시키는 노이즈 방지.

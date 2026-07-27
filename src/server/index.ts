@@ -7,6 +7,7 @@ import {
 	type AckRequest,
 	type ChannelBroadcastRequest,
 	type ChannelDeleteRequest,
+	type DmHistoryRequest,
 	HTTP_ENDPOINTS,
 	type PeerDeleteRequest,
 	type ReadRequest,
@@ -178,6 +179,16 @@ const TOPIC_HISTORY_BODY = {
 		beforeSentAt: ISO_TIMESTAMP_SCHEMA,
 	},
 	required: ["topicId"],
+	additionalProperties: false,
+};
+const DM_HISTORY_BODY = {
+	type: "object",
+	properties: {
+		peerA: PEER_ID_SCHEMA,
+		peerB: PEER_ID_SCHEMA,
+		limit: { type: "integer", minimum: 1, maximum: HISTORY_LIMIT_MAX },
+	},
+	required: ["peerA", "peerB"],
 	additionalProperties: false,
 };
 const TOPIC_DETAIL_BODY = {
@@ -372,6 +383,12 @@ export function createServer(opts: ServerOptions): Server {
 		HTTP_ENDPOINTS.topicHistory.path,
 		{ schema: { body: TOPIC_HISTORY_BODY } },
 		async (req) => ({ ok: true, ...broker.topicHistory(req.body) }),
+	);
+
+	app.post<{ Body: DmHistoryRequest }>(
+		HTTP_ENDPOINTS.dmHistory.path,
+		{ schema: { body: DM_HISTORY_BODY } },
+		async (req) => ({ ok: true, ...broker.dmHistory(req.body) }),
 	);
 
 	app.post<{ Body: TopicDetailRequest }>(

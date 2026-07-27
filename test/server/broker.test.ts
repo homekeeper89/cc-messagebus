@@ -58,6 +58,89 @@ describe("broker", () => {
 		);
 	});
 
+	test("register with same pid should disconnect previous peers", () => {
+		const events: Array<{ type: string; peerId?: string }> = [];
+		broker.events.on("session_disconnected", (e) =>
+			events.push(e as { type: string; peerId: string }),
+		);
+		broker.register({ peerId: "alice", pid: 4242 });
+		broker.register({ peerId: "bob", pid: 4242 });
+
+		const alice = db.getSession("alice");
+		const bob = db.getSession("bob");
+		assert.equal(alice?.status, "disconnected", "alice should be swept");
+		assert.equal(bob?.status, "connected", "bob should be connected");
+		assert.ok(
+			events.some((e) => e.peerId === "alice"),
+			"session_disconnected event for alice should be emitted",
+		);
+	});
+
+	test("register with same pid should keep peers with different pid untouched", () => {
+		broker.register({ peerId: "alice", pid: 111 });
+		broker.register({ peerId: "carol", pid: 222 });
+		broker.register({ peerId: "bob", pid: 111 });
+
+		assert.equal(db.getSession("alice")?.status, "disconnected");
+		assert.equal(db.getSession("carol")?.status, "connected");
+		assert.equal(db.getSession("bob")?.status, "connected");
+	});
+
+	test("register without pid should not sweep any peer", () => {
+		broker.register({ peerId: "alice", pid: 111 });
+		broker.register({ peerId: "bob" });
+		assert.equal(db.getSession("alice")?.status, "connected");
+		assert.equal(db.getSession("bob")?.status, "connected");
+	});
+
+	test("dmHistory should return messages for peer pair ordered by sentAt asc", async () => {
+		broker.register({ peerId: "alice" });
+		broker.register({ peerId: "bob" });
+		broker.send({ from: "alice", to: "bob", subject: "s1", body: "b1" });
+		await new Promise((r) => setTimeout(r, 5));
+		broker.send({ from: "bob", to: "alice", subject: "s2", body: "b2" });
+		await new Promise((r) => setTimeout(r, 5));
+		broker.send({ from: "alice", to: "bob", subject: "s3", body: "b3" });
+
+		const result = broker.dmHistory({ peerA: "alice", peerB: "bob" });
+		assert.equal(result.messages.length, 3);
+		assert.deepEqual(
+			result.messages.map((m) => m.subject),
+			["s1", "s2", "s3"],
+		);
+	});
+
+	test("dmHistory should return messages regardless of peerA/peerB argument order", () => {
+		broker.register({ peerId: "alice" });
+		broker.register({ peerId: "bob" });
+		broker.send({ from: "alice", to: "bob", subject: "s1", body: "b1" });
+		const forward = broker.dmHistory({ peerA: "alice", peerB: "bob" });
+		const reverse = broker.dmHistory({ peerA: "bob", peerB: "alice" });
+		assert.equal(forward.messages.length, 1);
+		assert.equal(reverse.messages.length, 1);
+	});
+
+	test("dmHistory should return empty for unknown pair", () => {
+		broker.register({ peerId: "alice" });
+		broker.register({ peerId: "bob" });
+		broker.send({ from: "alice", to: "bob", subject: "s1", body: "b1" });
+		const result = broker.dmHistory({ peerA: "alice", peerB: "carol" });
+		assert.equal(result.messages.length, 0);
+	});
+
+	test("dmHistory should reject limit out of range", () => {
+		assert.throws(
+			() => broker.dmHistory({ peerA: "a", peerB: "b", limit: 0 }),
+			(err: unknown) =>
+				err instanceof BrokerError && err.code === "VALIDATION_FAILED",
+		);
+		assert.throws(
+			() => broker.dmHistory({ peerA: "a", peerB: "b", limit: 100000 }),
+			(err: unknown) =>
+				err instanceof BrokerError && err.code === "VALIDATION_FAILED",
+		);
+	});
+
 	test("send: target not registered throws PEER_NOT_FOUND", () => {
 		broker.register({ peerId: "alice" });
 		assert.throws(

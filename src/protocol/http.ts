@@ -103,6 +103,7 @@ export const HTTP_ENDPOINTS = {
 	topicSend: { method: "POST", path: "/api/topic_send" },
 	topicUnsubscribe: { method: "POST", path: "/api/topic_unsubscribe" },
 	topicHistory: { method: "POST", path: "/api/topic_history" },
+	dmHistory: { method: "POST", path: "/api/dm_history" },
 	topicDetail: { method: "POST", path: "/api/topic_detail" },
 	topicMonitor: { method: "POST", path: "/api/topic_monitor" },
 	diagnostics: { method: "POST", path: "/api/diagnostics" },
@@ -222,6 +223,15 @@ export interface TopicHistoryResponse {
 	hasMore: boolean;
 }
 
+export interface DmHistoryRequest {
+	peerA: PeerId;
+	peerB: PeerId;
+	limit?: number;
+}
+export interface DmHistoryResponse {
+	messages: MessageDto[];
+}
+
 export interface TopicDetailRequest {
 	topicId: TopicId;
 }
@@ -334,6 +344,7 @@ export type TopicSubscribeApiResponse = ApiResponse<TopicSubscribeResponse>;
 export type TopicSendApiResponse = ApiResponse<TopicSendResponse>;
 export type TopicUnsubscribeApiResponse = ApiResponse<TopicUnsubscribeResponse>;
 export type TopicHistoryApiResponse = ApiResponse<TopicHistoryResponse>;
+export type DmHistoryApiResponse = ApiResponse<DmHistoryResponse>;
 export type TopicDetailApiResponse = ApiResponse<TopicDetailResponse>;
 export type TopicMonitorApiResponse = ApiResponse<TopicMonitorResponse>;
 export type DiagnosticsApiResponse = ApiResponse<DiagnosticsResponse>;

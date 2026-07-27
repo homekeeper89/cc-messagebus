@@ -1696,6 +1696,39 @@
 				}
 			}
 
+			async function loadDmHistory(peerA, peerB) {
+				try {
+					const res = await fetch("/api/dm_history", {
+						method: "POST",
+						headers: { "Content-Type": "application/json" },
+						body: JSON.stringify({ peerA, peerB, limit: HISTORY_LIMIT }),
+					});
+					const json = await res.json();
+					if (!json?.ok) return;
+					if (
+						selectedContext.type !== "dm" ||
+						selectedContext.peerA !== peerA ||
+						selectedContext.peerB !== peerB
+					)
+						return;
+					const seen = new Set(
+						flowBuffer
+							.filter((e) => e.type === "message_sent" && e.message)
+							.map((e) => e.message.id),
+					);
+					// 오래된 순서로 append → flowBuffer 는 최신-우선이므로 뒤로 넣는다.
+					for (const message of json.messages ?? []) {
+						if (seen.has(message.id)) continue;
+						flowBuffer.push({ type: "message_sent", message, kind: "dm" });
+					}
+					if (flowBuffer.length > FLOW_BUFFER_CAP)
+						flowBuffer.length = FLOW_BUFFER_CAP;
+					rerenderFlowWithCurrentFilter();
+				} catch {
+					// 무시
+				}
+			}
+
 			async function loadTopicHistory(topicId) {
 				try {
 					const res = await fetch("/api/topic_history", {
@@ -1741,6 +1774,9 @@
 					if (wasDetail) exitTopicDetail();
 					renderFlowHeader();
 					rerenderFlowWithCurrentFilter();
+					if (next.type === "dm") {
+						loadDmHistory(next.peerA, next.peerB);
+					}
 				}
 			}
 
