@@ -46,6 +46,29 @@ describe("dashboard html", () => {
 		assert.match(res.body.trim(), /^<!doctype html>/i);
 	});
 
+	test("dashboard renders DM in the same detail view as topics", async () => {
+		const res = await server.app.inject({ method: "GET", url: "/dashboard" });
+		const html = res.body;
+		// DM 선택 시 flow(JSON dump) 가 아니라 topic 과 같은 detail view 로 진입해야 한다.
+		assert.ok(
+			html.includes("function enterDmDetail("),
+			"expected enterDmDetail() to switch DM into detail view",
+		);
+		assert.ok(
+			html.includes("function renderDmDetailHeader("),
+			"expected DM detail header renderer",
+		);
+		// history 카드 렌더러를 topic 과 공유해야 markdown body / debug / issue 버튼이 동일하게 나온다.
+		assert.ok(
+			html.includes("function renderHistoryCard("),
+			"expected shared history card renderer for topic and DM",
+		);
+		assert.ok(
+			html.includes("function isDmDetail("),
+			"expected DM detail mode predicate",
+		);
+	});
+
 	test("dashboard html wires EventSource('/events')", async () => {
 		const res = await server.app.inject({ method: "GET", url: "/dashboard" });
 		assert.ok(res.body.includes('new EventSource("/events")'));
