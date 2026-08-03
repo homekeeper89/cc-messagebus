@@ -884,7 +884,8 @@
 						</div>
 					</form>
 					<h3 class="section-h">
-						Subscribers <span id="detail-subscribers-count">(0)</span>
+						<span id="detail-subscribers-label">Subscribers</span>
+						<span id="detail-subscribers-count">(0)</span>
 					</h3>
 					<ul id="detail-subscribers" class="card-list">
 						<li class="empty">(no subscribers)</li>
@@ -962,6 +963,7 @@
 			let selectedContext = { type: "all" };
 			let topicDetail = null;
 			let topicHistory = [];
+			let dmHistory = [];
 			let historyRefreshTimer = null;
 
 			const peersEl = document.getElementById("peers");
@@ -981,6 +983,9 @@
 			const detailSubsEl = document.getElementById("detail-subscribers");
 			const detailSubsCountEl = document.getElementById(
 				"detail-subscribers-count",
+			);
+			const detailSubsLabelEl = document.getElementById(
+				"detail-subscribers-label",
 			);
 			const detailHistEl = document.getElementById("detail-history");
 			const detailHistMetaEl = document.getElementById("detail-history-meta");
@@ -1315,16 +1320,7 @@
 					return false;
 				}
 
-				if (ctx.type === "dm") {
-					const t = event.type;
-					if (t === "message_sent") {
-						if (event.kind && event.kind !== "dm") return false;
-						const pair = dmPair(event.message.from, event.message.to);
-						return pair.peerA === ctx.peerA && pair.peerB === ctx.peerB;
-					}
-					return false;
-				}
-
+				// dm 은 flow 대신 detail view 를 쓰므로 여기서 걸러질 일이 없다.
 				return false;
 			}
 
@@ -1351,8 +1347,18 @@
 				for (let i = matched.length - 1; i >= 0; i--) pushFlow(matched[i]);
 			}
 
+			// topic / dm 모두 flow 대신 detail view 를 쓴다.
+			// topic 전용 로직(subscriber, broadcast, archive)은 isDetailMode 로 구분한다.
 			function isDetailMode() {
 				return selectedContext.type === "topic";
+			}
+
+			function isDmDetail() {
+				return selectedContext.type === "dm";
+			}
+
+			function usesDetailView(ctx) {
+				return ctx.type === "topic" || ctx.type === "dm";
 			}
 
 			function makeEmpty(text) {
@@ -1439,22 +1445,49 @@
 				detailRoot.hidden = false;
 				detailTitleEl.textContent = `#${topicId}`;
 				detailMetaEl.textContent = "loading…";
+				detailSubsLabelEl.textContent = "Subscribers";
 				detailSubsCountEl.textContent = "(0)";
 				detailHistMetaEl.textContent = "(0)";
 				detailSubsEl.replaceChildren(makeEmpty("loading…"));
 				detailHistEl.replaceChildren(makeEmpty("loading…"));
+				broadcastToggleBtn.hidden = false;
+				topicDeleteBtn.hidden = false;
 			}
 
-			function exitTopicDetail() {
-				flowHeaderEl.hidden = false;
-				flowEl.hidden = false;
-				detailRoot.hidden = true;
+			// DM 도 topic 과 같은 detail view 를 쓰되, topic 전용 액션(broadcast/archive/delete)은 감춘다.
+			function enterDmDetail(peerA, peerB) {
+				flowHeaderEl.hidden = true;
+				flowEl.hidden = true;
+				detailRoot.hidden = false;
+				detailTitleEl.textContent = `${peerA} ↔ ${peerB}`;
+				detailMetaEl.textContent = "loading…";
+				detailSubsLabelEl.textContent = "Participants";
+				detailSubsCountEl.textContent = "(2)";
+				detailHistMetaEl.textContent = "(0)";
+				detailSubsEl.replaceChildren(makeEmpty("loading…"));
+				detailHistEl.replaceChildren(makeEmpty("loading…"));
+				broadcastToggleBtn.hidden = true;
+				broadcastForm.hidden = true;
+				topicDeleteBtn.hidden = true;
+				topicArchiveBtn.hidden = true;
+				topicUnarchiveBtn.hidden = true;
+			}
+
+			function resetDetailState() {
 				topicDetail = null;
 				topicHistory = [];
+				dmHistory = [];
 				if (historyRefreshTimer) {
 					clearTimeout(historyRefreshTimer);
 					historyRefreshTimer = null;
 				}
+			}
+
+			function exitDetail() {
+				flowHeaderEl.hidden = false;
+				flowEl.hidden = false;
+				detailRoot.hidden = true;
+				resetDetailState();
 				broadcastForm.hidden = true;
 				broadcastErrEl.textContent = "";
 			}
@@ -1625,57 +1658,122 @@
 				);
 			}
 
-			function renderDetailHistory() {
-				const msgs = topicHistory;
+			// topic history \uc640 DM history \uac00 \uacf5\uc720\ud558\ub294 \uba54\uc2dc\uc9c0 \uce74\ub4dc \ub80c\ub354\ub7ec.
+			function renderHistoryCard(m) {
+				const li = document.createElement("li");
+				li.dataset.kind = "history";
+				const time = document.createElement("span");
+				time.className = "time";
+				time.textContent = timeLabel(m.sentAt);
+				const from = document.createElement("span");
+				from.className = "from";
+				from.textContent = m.from;
+				const subj = document.createElement("span");
+				subj.className = "subject";
+				subj.textContent = m.subject;
+				const body = document.createElement("div");
+				body.className = "body";
+				body.innerHTML = renderMarkdown(m.body ?? "");
+				const debugBtn = document.createElement("button");
+				debugBtn.type = "button";
+				debugBtn.className = "debug-toggle";
+				debugBtn.textContent = "\ud83d\udd27 debug";
+				debugBtn.addEventListener("click", (e) => {
+					e.stopPropagation();
+					li.dataset.debug = li.dataset.debug === "1" ? "0" : "1";
+				});
+				const issueBtn = document.createElement("button");
+				issueBtn.type = "button";
+				issueBtn.className = "issue-toggle";
+				issueBtn.textContent = "\ud83d\udcdd issue";
+				issueBtn.addEventListener("click", (e) => {
+					e.stopPropagation();
+					openIssueModal({ triggerMessage: m });
+				});
+				const debug = document.createElement("pre");
+				debug.className = "debug";
+				debug.textContent = JSON.stringify(m, null, 2);
+				li.append(time, from, subj, body, debugBtn, issueBtn, debug);
+				li.addEventListener("click", (e) => {
+					if (e.target.closest(".debug-toggle")) return;
+					if (window.getSelection()?.toString()) return;
+					li.dataset.open = li.dataset.open === "1" ? "0" : "1";
+				});
+				return li;
+			}
+
+			function renderHistoryList(msgs) {
 				detailHistMetaEl.textContent = `(${msgs.length})`;
 				if (msgs.length === 0) {
 					detailHistEl.replaceChildren(makeEmpty("(no messages)"));
 					return;
 				}
-				detailHistEl.replaceChildren(
-					...msgs.map((m) => {
+				detailHistEl.replaceChildren(...msgs.map(renderHistoryCard));
+			}
+
+			function renderDetailHistory() {
+				renderHistoryList(topicHistory);
+			}
+
+			function renderDmDetailHeader() {
+				if (!isDmDetail()) return;
+				const { peerA, peerB } = selectedContext;
+				detailTitleEl.textContent = `${peerA} ↔ ${peerB}`;
+				const count = dmHistory.length;
+				const noun = count === 1 ? "message" : "messages";
+				const last = dmHistory[dmHistory.length - 1];
+				detailMetaEl.textContent = last
+					? `${count} ${noun} · last ${relativeAgo(last.sentAt)} ago`
+					: `${count} ${noun}`;
+			}
+
+			function renderDmParticipants() {
+				if (!isDmDetail()) return;
+				const peers = [selectedContext.peerA, selectedContext.peerB];
+				detailSubsCountEl.textContent = `(${peers.length})`;
+				detailSubsEl.replaceChildren(
+					...peers.map((peerId) => {
 						const li = document.createElement("li");
-						li.dataset.kind = "history";
-						const time = document.createElement("span");
-						time.className = "time";
-						time.textContent = timeLabel(m.sentAt);
-						const from = document.createElement("span");
-						from.className = "from";
-						from.textContent = m.from;
-						const subj = document.createElement("span");
-						subj.className = "subject";
-						subj.textContent = m.subject;
-						const body = document.createElement("div");
-						body.className = "body";
-						body.innerHTML = renderMarkdown(m.body ?? "");
-						const debugBtn = document.createElement("button");
-						debugBtn.type = "button";
-						debugBtn.className = "debug-toggle";
-						debugBtn.textContent = "\ud83d\udd27 debug";
-						debugBtn.addEventListener("click", (e) => {
-							e.stopPropagation();
-							li.dataset.debug = li.dataset.debug === "1" ? "0" : "1";
-						});
-						const issueBtn = document.createElement("button");
-						issueBtn.type = "button";
-						issueBtn.className = "issue-toggle";
-						issueBtn.textContent = "\ud83d\udcdd issue";
-						issueBtn.addEventListener("click", (e) => {
-							e.stopPropagation();
-							openIssueModal({ triggerMessage: m });
-						});
-						const debug = document.createElement("pre");
-						debug.className = "debug";
-						debug.textContent = JSON.stringify(m, null, 2);
-						li.append(time, from, subj, body, debugBtn, issueBtn, debug);
-						li.addEventListener("click", (e) => {
-							if (e.target.closest(".debug-toggle")) return;
-							if (window.getSelection()?.toString()) return;
-							li.dataset.open = li.dataset.open === "1" ? "0" : "1";
-						});
+						const peer = document.createElement("span");
+						peer.className = "peer";
+						peer.textContent = peerId;
+						const sent = dmHistory.filter((m) => m.from === peerId);
+						const count = document.createElement("span");
+						count.className = "stat";
+						count.textContent = `sent ${sent.length}`;
+						const lastSent = sent[sent.length - 1];
+						const last = document.createElement("span");
+						last.className = "stat";
+						last.textContent = lastSent
+							? `last ${relativeAgo(lastSent.sentAt)} ago`
+							: "never sent";
+						const status = document.createElement("span");
+						status.className = "stat";
+						status.textContent = sessions.get(peerId)?.status ?? "not registered";
+						li.append(peer, count, last, status);
 						return li;
 					}),
 				);
+			}
+
+			function renderDmDetail() {
+				renderDmDetailHeader();
+				renderDmParticipants();
+				renderHistoryList(dmHistory);
+			}
+
+			function appendDmDetailMessage(message) {
+				if (!isDmDetail()) return;
+				const pair = dmPair(message.from, message.to);
+				if (
+					pair.peerA !== selectedContext.peerA ||
+					pair.peerB !== selectedContext.peerB
+				)
+					return;
+				if (dmHistory.some((m) => m.id === message.id)) return;
+				// history 는 sent_at ASC 이므로 신규 메시지는 뒤에 붙인다.
+				dmHistory = [...dmHistory, message];
+				renderDmDetail();
 			}
 
 			async function loadTopicDetail(topicId) {
@@ -1706,24 +1804,13 @@
 					const json = await res.json();
 					if (!json?.ok) return;
 					if (
-						selectedContext.type !== "dm" ||
+						!isDmDetail() ||
 						selectedContext.peerA !== peerA ||
 						selectedContext.peerB !== peerB
 					)
 						return;
-					const seen = new Set(
-						flowBuffer
-							.filter((e) => e.type === "message_sent" && e.message)
-							.map((e) => e.message.id),
-					);
-					// 오래된 순서로 append → flowBuffer 는 최신-우선이므로 뒤로 넣는다.
-					for (const message of json.messages ?? []) {
-						if (seen.has(message.id)) continue;
-						flowBuffer.push({ type: "message_sent", message, kind: "dm" });
-					}
-					if (flowBuffer.length > FLOW_BUFFER_CAP)
-						flowBuffer.length = FLOW_BUFFER_CAP;
-					rerenderFlowWithCurrentFilter();
+					dmHistory = json.messages ?? [];
+					renderDmDetail();
 				} catch {
 					// 무시
 				}
@@ -1759,24 +1846,25 @@
 
 			function onTreeRowClick(ctx) {
 				const next = sameContext(selectedContext, ctx) ? { type: "all" } : ctx;
-				const wasDetail = isDetailMode();
-				const willBeDetail = next.type === "topic";
+				const wasDetail = usesDetailView(selectedContext);
 				selectedContext = next;
 				renderTreeSelection();
 				renderPeers();
 				renderTopics();
 				renderDms();
-				if (willBeDetail) {
+				if (next.type === "topic") {
+					resetDetailState();
 					enterTopicDetail(next.topicId);
 					loadTopicDetail(next.topicId);
 					loadTopicHistory(next.topicId);
+				} else if (next.type === "dm") {
+					resetDetailState();
+					enterDmDetail(next.peerA, next.peerB);
+					loadDmHistory(next.peerA, next.peerB);
 				} else {
-					if (wasDetail) exitTopicDetail();
+					if (wasDetail) exitDetail();
 					renderFlowHeader();
 					rerenderFlowWithCurrentFilter();
-					if (next.type === "dm") {
-						loadDmHistory(next.peerA, next.peerB);
-					}
 				}
 			}
 
@@ -1944,6 +2032,7 @@
 					applyLastActivity(data.message.to, data.message.sentAt);
 					if (!data.kind || data.kind === "dm") {
 						applyDmMessage(data.message);
+						appendDmDetailMessage(data.message);
 					}
 					pushFlowMaybe(data);
 				});
@@ -2045,7 +2134,7 @@
 						isDetailMode() &&
 						selectedContext.topicId === data.topicId
 					) {
-						exitTopicDetail();
+						exitDetail();
 						selectedContext = { type: "all" };
 						renderTreeSelection();
 						renderFlowHeader();
