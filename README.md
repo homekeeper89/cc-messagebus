@@ -52,10 +52,66 @@ npx cc-messagebus serve
 }
 ```
 
-### 2) Topic (Pub-Sub) 흐름 예시
+### 2) 사용법 (자연어)
 
-> 0.3.0 부터 agent 가 1:1 DM 으로 보내는 것은 차단됐습니다. 세션 간 통신은 topic 으로 합니다.
+MCP 도구는 **자연어로 Claude 에게 부탁**하면 Claude 가 알아서 해당 도구를 호출합니다. 아래처럼 대화하듯 지시하면 됩니다 (직접 `topic_send({...})` 같은 함수를 타이핑할 필요 없음).
+
+#### 초기 세션 등록
+
+각 Claude Code 세션마다 고유한 `peerId` 로 한 번 `register` 하면, broker daemon 이 자동으로 뜨고 수신 알림용 `Monitor` 까지 자동 구성됩니다.
+
+```
+- 세션 A (첫 번째 터미널/창)
+$ cc-messagebus에서 세션 session-a 를 등록해줘
+
+- 세션 B (다른 터미널/창에서 새 Claude Code 세션 실행)
+$ cc-messagebus에서 peerId session-b로 register 하고 Monitor 실행해줘
+```
+
+#### 방법 1 — 1:1 다이렉트 메시지
+
+특정 세션 한 곳에만 보낼 때. Claude 가 내부적으로 `send(to: "session-b", ...)` 를 호출합니다.
+
+```
+- 세션 A → session-b 에게 전송
+$ session-b한테 "안녕" 메시지 보내줘
+
+- 세션 B: Monitor 가 자동으로 알림 수신 → read() 후 ack(messageId)
+
+- 세션 B 에서 답장
+$ session-a한테 답장 보내줘
+```
+
+#### 방법 2 — 1:N (topic 이용)
+
+여러 세션이 동시에 받아야 할 때. topic 을 만들고 구독한 뒤 발행하면 구독자 전원 inbox 로 fan-out 됩니다.
+
+```
+- 세션 A
+$ test-topic 이라는 토픽 만들고 구독해줘
+
+- 세션 B
+$ test-topic 토픽 구독해줘
+
+- 세션 A (또는 B)
+$ test-topic에 "작업 시작합니다" 메시지 발행해줘
+
+- 반대편 세션: Monitor 로 자동 수신 → read() / ack()
+```
+
+#### 실제 협업 작업
+
+두 세션이 실제로 협업(A 가 지시하고 B 가 결과 보고)까지 하려면, 자연어로 이렇게 지시하면 됩니다.
+
+```
+$ session-b에게 X 작업을 지시하고 결과를 기다려줘
+```
+
+### 3) Topic (Pub-Sub) 도구 호출 상세
+
 > HTTP `/send` RPC 는 운영자 디버깅용으로 유지되며, topic fan-out delivery 가 이 inbox 인프라에 의존합니다.
+>
+> 아래는 Claude 가 내부적으로 호출하는 도구 시그니처입니다. 일반 사용자는 위 "사용법 (자연어)" 처럼 대화로 지시하면 됩니다.
 
 ```
 # 발행자
@@ -71,7 +127,7 @@ topic_unsubscribe({ topicId: "demo" })
 
 Topic 은 DM 과 동일한 visibility timeout / TTL 라이프사이클을 따르며, subscriber 별로 독립된 inbox 사본을 받습니다. publisher 자신은 자기 inbox 에 사본을 받지 않습니다.
 
-### 3) 대시보드
+### 4) 대시보드
 
 ```bash
 cc-messagebus dashboard
