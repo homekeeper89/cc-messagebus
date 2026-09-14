@@ -1845,6 +1845,9 @@
 			}
 
 			function onTreeRowClick(ctx) {
+				// 행 텍스트를 드래그 복사하면 mouseup 이 click 으로 이어져 같은 행을 다시 누른
+				// 것으로 처리되고, toggle 때문에 detail view 가 닫힌다. 선택 중이면 무시한다.
+				if (window.getSelection()?.toString()) return;
 				const next = sameContext(selectedContext, ctx) ? { type: "all" } : ctx;
 				const wasDetail = usesDetailView(selectedContext);
 				selectedContext = next;

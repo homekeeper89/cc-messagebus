@@ -69,6 +69,20 @@ describe("dashboard html", () => {
 		);
 	});
 
+	test("tree row click ignores drag-to-copy text selection", async () => {
+		const res = await server.app.inject({ method: "GET", url: "/dashboard" });
+		const body = res.body.slice(res.body.indexOf("function onTreeRowClick("));
+		const guard = body.indexOf("window.getSelection()?.toString()");
+		const toggle = body.indexOf("sameContext(selectedContext, ctx)");
+		// 행 텍스트를 드래그 복사하면 click 이 뒤따라 발생한다. 선택 상태를 먼저 걸러내지
+		// 않으면 같은 행 재클릭으로 간주되어 topic / DM detail view 가 닫힌다.
+		assert.ok(guard !== -1, "expected onTreeRowClick to guard on text selection");
+		assert.ok(
+			guard < toggle,
+			"selection guard must run before the same-context toggle",
+		);
+	});
+
 	test("dashboard html wires EventSource('/events')", async () => {
 		const res = await server.app.inject({ method: "GET", url: "/dashboard" });
 		assert.ok(res.body.includes('new EventSource("/events")'));
