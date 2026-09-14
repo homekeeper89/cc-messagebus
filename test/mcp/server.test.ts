@@ -1,5 +1,8 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
 import { beforeEach, describe, it } from "node:test";
+import { fileURLToPath } from "node:url";
 import {
 	type BrokerClient,
 	McpClientError,
@@ -13,6 +16,15 @@ import {
 	MCP_TOOL_NAMES,
 	type McpToolKey,
 } from "../../src/protocol/mcp.js";
+
+// register 시 ensureBrokerRunning 이 expectedVersion=PKG_VERSION 으로 버전 협상을 한다.
+// mock 이 이 버전을 그대로 돌려주면 "이미 최신 broker 가 살아있음" 경로로 빠져 respawn 을 안 탄다.
+const PKG_VERSION: string = (() => {
+	const here = dirname(fileURLToPath(import.meta.url));
+	const pkgPath = join(here, "..", "..", "package.json");
+	const raw = JSON.parse(readFileSync(pkgPath, "utf8")) as { version: string };
+	return raw.version;
+})();
 
 interface CallLog {
 	register: { peerId: string }[];
@@ -138,6 +150,10 @@ function makeMockClient(overrides: Partial<BrokerClient> = {}): {
 				},
 			};
 		},
+		topicMonitor: async () => ({ messages: [], cursor: null }),
+		// 기본 mock 은 최신 버전 broker 가 살아있는 상태를 흉내낸다 → 버전 협상이 respawn 을 안 탐.
+		serverInfo: async () => ({ issueRepo: null, version: PKG_VERSION }),
+		stop: async () => ({ stopping: true, version: PKG_VERSION }),
 		...overrides,
 	};
 	return { client, calls };

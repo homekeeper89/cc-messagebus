@@ -63,7 +63,9 @@ export async function dispatch(
 ): Promise<unknown> {
 	switch (name) {
 		case MCP_TOOL_NAMES.register: {
-			await ensureBrokerRunning(client, spawnCmd);
+			await ensureBrokerRunning(client, spawnCmd, {
+				expectedVersion: PKG_VERSION,
+			});
 			const peerId = args.peerId as string;
 			const res = await client.register({ peerId, pid: process.pid });
 			setPeerId(peerId);
@@ -171,7 +173,9 @@ export async function runMcp(opts: RunMcpOptions = {}): Promise<void> {
 	const spawnCmd = opts.spawnCmd ?? defaultSpawnCmd();
 
 	try {
-		await ensureBrokerRunning(client, spawnCmd);
+		await ensureBrokerRunning(client, spawnCmd, {
+			expectedVersion: PKG_VERSION,
+		});
 	} catch (e) {
 		// best-effort: dashboard 즉시 동작이 안 되더라도 MCP server는 계속 살아 있음.
 		// 첫 register 호출 시 dispatch에서 다시 시도한다.

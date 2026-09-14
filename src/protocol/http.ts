@@ -114,6 +114,7 @@ export const HTTP_ENDPOINTS = {
 	topicUnarchive: { method: "POST", path: "/api/topic_unarchive" },
 	peerDelete: { method: "POST", path: "/api/peer_delete" },
 	peersClean: { method: "POST", path: "/api/peers_clean" },
+	stop: { method: "POST", path: "/api/stop" },
 } as const;
 
 export interface RegisterRequest {
@@ -279,6 +280,11 @@ export interface ServerInfoResponse {
 	version: string;
 }
 
+export interface StopResponse {
+	stopping: boolean;
+	version: string;
+}
+
 export interface ChannelBroadcastRequest {
 	topicId: TopicId;
 	from: PeerId;
@@ -355,3 +361,4 @@ export type TopicArchiveApiResponse = ApiResponse<TopicArchiveResponse>;
 export type TopicUnarchiveApiResponse = ApiResponse<TopicUnarchiveResponse>;
 export type PeerDeleteApiResponse = ApiResponse<PeerDeleteResponse>;
 export type PeersCleanApiResponse = ApiResponse<PeersCleanResponse>;
+export type StopApiResponse = ApiResponse<StopResponse>;

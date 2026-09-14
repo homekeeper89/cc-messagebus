@@ -11,6 +11,8 @@ import {
 	type RegisterResponse,
 	type SendRequest,
 	type SendResponse,
+	type ServerInfoResponse,
+	type StopResponse,
 	type TopicCreateRequest,
 	type TopicCreateResponse,
 	type TopicDetailRequest,
@@ -59,6 +61,8 @@ export interface BrokerClient {
 	topicHistory: (req: TopicHistoryRequest) => Promise<TopicHistoryResponse>;
 	topicDetail: (req: TopicDetailRequest) => Promise<TopicDetailResponse>;
 	topicMonitor: (req: TopicMonitorRequest) => Promise<TopicMonitorResponse>;
+	serverInfo: () => Promise<ServerInfoResponse>;
+	stop: () => Promise<StopResponse>;
 }
 
 export function createBrokerClient(baseUrl: string): BrokerClient {
@@ -159,5 +163,12 @@ export function createBrokerClient(baseUrl: string): BrokerClient {
 				HTTP_ENDPOINTS.topicMonitor.path,
 				req,
 			),
+		serverInfo: () =>
+			call<Record<string, never>, ServerInfoResponse>(
+				HTTP_ENDPOINTS.serverInfo.path,
+				{},
+			),
+		stop: () =>
+			call<Record<string, never>, StopResponse>(HTTP_ENDPOINTS.stop.path, {}),
 	};
 }
