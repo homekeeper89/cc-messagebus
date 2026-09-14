@@ -759,6 +759,59 @@ describe("http", () => {
 		assert.equal(body.issueRepo, null);
 		assert.ok(typeof body.version === "string" && body.version.length > 0);
 	});
+
+	test("POST /api/stop without onStopRequest returns stopping:false", async () => {
+		const res = await server.app.inject({
+			method: "POST",
+			url: "/api/stop",
+			payload: {},
+		});
+		assert.equal(res.statusCode, 200);
+		const body = res.json();
+		assert.equal(body.ok, true);
+		assert.equal(body.stopping, false);
+		assert.ok(typeof body.version === "string" && body.version.length > 0);
+	});
+});
+
+describe("http /api/stop with onStopRequest", () => {
+	let tmpDir: string;
+	let dbPath: string;
+
+	before(() => {
+		tmpDir = mkdtempSync(join(tmpdir(), "ccmb-stop-"));
+		dbPath = join(tmpDir, "data.db");
+	});
+
+	after(() => {
+		rmSync(tmpDir, { recursive: true, force: true });
+	});
+
+	test("returns stopping:true and invokes onStopRequest after response", async () => {
+		let stopCalled = false;
+		const stopSrv = createServer({
+			dbPath,
+			config: { issueRepo: null },
+			onStopRequest: () => {
+				stopCalled = true;
+			},
+		});
+		await stopSrv.app.ready();
+		const res = await stopSrv.app.inject({
+			method: "POST",
+			url: "/api/stop",
+			payload: {},
+		});
+		assert.equal(res.statusCode, 200);
+		const body = res.json();
+		assert.equal(body.ok, true);
+		assert.equal(body.stopping, true);
+		// finish 핸들러가 비동기로 불릴 수 있으니 microtask/tick 한 번 양보
+		await new Promise((r) => setTimeout(r, 20));
+		assert.equal(stopCalled, true, "onStopRequest must fire after response");
+		await stopSrv.app.close();
+		stopSrv.db.close();
+	});
 });
 
 describe("tail SSE", () => {

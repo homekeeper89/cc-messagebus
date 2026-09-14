@@ -78,6 +78,11 @@ const PEERS_CLEAN_BODY = {
 	properties: {},
 	additionalProperties: false,
 };
+const STOP_BODY = {
+	type: "object",
+	properties: {},
+	additionalProperties: false,
+};
 const UNREGISTER_BODY = {
 	type: "object",
 	properties: {
@@ -257,6 +262,9 @@ export interface ServerOptions {
 	cleanupIntervalSec?: number;
 	dashboardUrl?: string;
 	logger?: boolean;
+	// serve 프로세스가 POST /api/stop 수신 시 graceful shutdown 을 수행하도록 주입.
+	// 미주입(테스트/임베드) 시 stop 라우트는 응답만 하고 프로세스를 종료하지 않는다.
+	onStopRequest?: () => void;
 	// 테스트 / 임베드 환경에서 직접 주입 시 사용. production 은 loadConfig() 자동 호출.
 	config?: ServerConfig;
 }
@@ -446,6 +454,22 @@ export function createServer(opts: ServerOptions): Server {
 		HTTP_ENDPOINTS.peersClean.path,
 		{ schema: { body: PEERS_CLEAN_BODY } },
 		async () => ({ ok: true, ...broker.peersClean() }),
+	);
+
+	app.post(
+		HTTP_ENDPOINTS.stop.path,
+		{ schema: { body: STOP_BODY } },
+		async (_req, reply) => {
+			const version = broker.serverInfo().version;
+			// 응답을 먼저 완전히 flush 한 뒤 종료해야 caller 가 stopping:true 를 확실히 받는다.
+			// onStopRequest 미주입(테스트/임베드) 시엔 프로세스를 죽이지 않고 응답만 반환.
+			if (opts.onStopRequest) {
+				reply.raw.on("finish", () => {
+					opts.onStopRequest?.();
+				});
+			}
+			return { ok: true, stopping: opts.onStopRequest != null, version };
+		},
 	);
 
 	app.get("/dashboard", async (_req, reply) => {
